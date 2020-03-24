@@ -12,6 +12,7 @@ var int strength;
 
 // Miscellaneous 
 var bool bSorted;
+var bool bMidGameJoin;
  
 // Control variables
 var bool bInitialized;
