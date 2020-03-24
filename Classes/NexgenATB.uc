@@ -24,9 +24,10 @@ var Sound startSound, playSound, teamSound[2];
 var Color colorWhite, colorOrange;
 var Color TeamColor[4];
 
-const maxInitWaitTime         = 5.0;
-const gameStartDelay          = 2.5;
-const minMidGameJoinWaitTime  = 3.0;           // Min a mid-game joined player waits for team assignment (starting at ATBClient initialization) 
+const minSinglePlayerWaitTime = 8.0;           // Min amount of seconds a single player in the server has to wait before the game starts
+const maxInitWaitTime         = 5.0;           // Max amount of seconds the initial sorting can be delayed when waiting for a client to init
+const gameStartDelay          = 2.5;           // Amount of seconds to wait after a team is assigned before proceeding
+const minMidGameJoinWaitTime  = 3.0;           // Min amount of seconds a mid-game joined player waits for team assignment (starting at ATBClient initialization) 
 const maxMidGameJoinWaitTime  = 5.0;           // Max amount of seconds until a team is assigned for mid-game joined players (starting at ATBClient initialization) 
 
 /***************************************************************************************************
@@ -90,8 +91,6 @@ function clientCreated(NexgenClient client) {
   ATBClient.nextATBClient = ATBClientList;
   ATBClientList = ATBClient;
   numCurrPlayers++;
-  
-  if(numCurrPlayers == 1) waitFinishTime = Level.TimeSeconds;
 }
 
 /***************************************************************************************************
@@ -172,9 +171,7 @@ function playerLeft(NexgenClient client) {
     ATBClient.destroy();
     numCurrPlayers--;
   }
-  
-  if(numCurrPlayers == 1) waitFinishTime = Level.TimeSeconds;
-}
+  }
 
 /***************************************************************************************************
  *
@@ -250,6 +247,7 @@ function tick(float deltaTime) {
   local int i;
   local int numPlayersInitialized;
   local bool bStillIniting;
+  local float playerJoinTime;
   local NexgenClient client;
   local NexgenATBClient ATBClient;
   
@@ -273,8 +271,18 @@ function tick(float deltaTime) {
         else                    FlashMessageToPlayer(client, "", colorWhite, 1);        
       }
       
+      // Single player?
+      if(numCurrPlayers == 1) {
+        for(client = control.clientList; client != none; client = client.nextClient) {
+          if(!client.bSpectator) {
+             playerJoinTime = client.timeSeconds; 
+             break;
+          }
+        }
+      } else playerJoinTime = -1;
+      
       // Start?
-      if(control.gInf.countDown == -1 && numCurrPlayers > 0) {
+      if(control.gInf.countDown == -1 && numCurrPlayers > 0 && (playerJoinTime == -1 || playerJoinTime > minSinglePlayerWaitTime)) {
         // Check if all clients are initialized 
         numPlayersInitialized = numCurrPlayers;
         for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
