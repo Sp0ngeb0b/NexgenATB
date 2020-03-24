@@ -24,9 +24,10 @@ var Sound startSound, playSound, teamSound[2];
 var Color colorWhite, colorOrange;
 var Color TeamColor[4];
 
-const maxInitWaitTime    = 10.0;
-const gameStartDelay     = 2.5;
-const maxMidGameJoinWait = 5.0;               // Max amount of seconds until a team is assigned for mid-game joined players (starting at ATBClient initialization) 
+const maxInitWaitTime         = 5.0;
+const gameStartDelay          = 2.5;
+const minMidGameJoinWaitTime  = 3.0;           // Min a mid-game joined player waits for team assignment (starting at ATBClient initialization) 
+const maxMidGameJoinWaitTime  = 5.0;           // Max amount of seconds until a team is assigned for mid-game joined players (starting at ATBClient initialization) 
 
 /***************************************************************************************************
  *
@@ -37,6 +38,15 @@ const maxMidGameJoinWait = 5.0;               // Max amount of seconds until a t
  *
  **************************************************************************************************/
 function bool initialize() {
+
+  if(TeamGamePlus(Level.Game) == none) return false;
+
+  if(!control.sConf.enableNexgenStartControl) {
+    TeamGamePlus(Level.Game).bBalanceTeams = true;
+    return false;
+  } else {
+    TeamGamePlus(Level.Game).bBalanceTeams = false;
+  }
 
 	// Load settings.
   if (control.bUseExternalConfig) {
@@ -80,27 +90,8 @@ function clientCreated(NexgenClient client) {
   ATBClient.nextATBClient = ATBClientList;
   ATBClientList = ATBClient;
   numCurrPlayers++;
-
+  
   if(numCurrPlayers == 1) waitFinishTime = Level.TimeSeconds;
-}
-
-/***************************************************************************************************
- *
- *  $DESCRIPTION  Called whenever a client has finished its initialisation process. During this
- *                process things such as the remote control window are created. So only after the
- *                client is fully initialized all functions can be safely called.
- *  $PARAM        client  The client that has finished initializing.
- *  $REQUIRE      client != none
- *
- **************************************************************************************************/
-function clientInitialized(NexgenClient client) {
-  local NexgenATBClient ATBClient;
-  
-  ATBClient = getATBClient(client);
-  
-  if(ATBClient != none) {
-    ATBClient.locateDataEntry();
-  }
 }
 
 /***************************************************************************************************
@@ -140,7 +131,7 @@ function playerJoined(NexgenClient client) {
   if(control.gInf != none) {
     ATBClient = getATBClient(client);
     
-    if(ATBClient != none && !ATBClient.bSorted) {
+    if(ATBClient != none) {
       // Player not yet initialized. Disallow play.
       if(control.gInf.gameState == control.gInf.GS_Playing) {
         Level.Game.DiscardInventory(client.player);	
@@ -152,9 +143,10 @@ function playerJoined(NexgenClient client) {
          control.gInf.gameState == control.gInf.GS_Starting) {
         ATBClient.bMidGameJoin = true;
       }
+      
+      ATBClient.locateDataEntry();
     }
   }
-  
 }
 
 /***************************************************************************************************
@@ -222,7 +214,7 @@ function gameStarted() {
   local NexgenATBClient ATBClient;
   
   for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
-    if(!ATBClient.bMidGameJoin) {
+    if(ATBClient.bSorted) {
       // Play announcer
       if(playSound != none) ATBClient.client.player.clientPlaySound(playSound, , true);
     }
@@ -249,6 +241,11 @@ function playerRespawned(NexgenClient client) {
 
 }
 
+/***************************************************************************************************
+ *
+ *  $DESCRIPTION  Called when the game executes its next 'game' tick.
+ *
+ **************************************************************************************************/
 function tick(float deltaTime) {
   local int i;
   local int numPlayersInitialized;
@@ -345,8 +342,9 @@ function tick(float deltaTime) {
               for(i=0; i<7; i++) {
                 ATBClient.client.player.SetProgressMessage("", i);
               }
-              // Play announcer
-              if(playSound != none) ATBClient.client.player.clientPlaySound(playSound, , true);
+            } else {
+              FlashMessageToPlayer(sortedATBClients[i].client, "You are on "$TeamGamePlus(Level.Game).Teams[sortedATBClients[i].client.player.playerReplicationInfo.team].TeamName$".", teamColor[sortedATBClients[i].client.player.playerReplicationInfo.team]);
+              FlashMessageToPlayer(sortedATBClients[i].client, "Say !o to open the Nexgen control panel.", colorWhite, 1);     
             }
           }
         }
@@ -399,17 +397,23 @@ function tick(float deltaTime) {
  **************************************************************************************************/
 function virtualTimer() {
   local NexgenATBClient ATBClient;
+  local bool bBetterWait;
   local int midGameJoinToSort;
 
-  if( midGameJoinTeamSortingTime != 0.0 && longestMidGameJoinWaitTime != 0.0 && (Level.TimeSeconds - longestMidGameJoinWaitTime) > maxMidGameJoinWait) {
+  // Mid-game-joins
+  if( midGameJoinTeamSortingTime == 0.0 && longestMidGameJoinWaitTime != 0.0 && (Level.TimeSeconds - longestMidGameJoinWaitTime) > minMidGameJoinWaitTime) {
     // Check for other waiting clients
     for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
-      if(ATBClient.bMidGameJoin && ATBClient.bInitialized && !ATBClient.bSorted) {
-        midGameJoinToSort++;
+      if(ATBClient.bMidGameJoin && !ATBClient.bSorted) {
+        if(!ATBClient.bInitialized) bBetterWait = true;
+        else                        midGameJoinToSort++;
       }
     }
-    if(midGameJoinToSort > 0) midGameJoinTeamSorting(midGameJoinToSort);
-    else longestMidGameJoinWaitTime = 0.0;
+   
+    if(!bBetterWait || (Level.TimeSeconds - longestMidGameJoinWaitTime) > maxMidGameJoinWaitTime) {
+      if(midGameJoinToSort > 0) midGameJoinTeamSorting(midGameJoinToSort);
+      else longestMidGameJoinWaitTime = 0.0;
+    }
   }
 }
 
@@ -559,7 +563,7 @@ function midGameJoinTeamSorting(int midGameJoinToSort) {
   for(i=0; i<midGameJoinToSort; i++) {
     FlashMessageToPlayer(sortedATBClients[i].client, "You are on "$TeamGamePlus(Level.Game).Teams[sortedATBClients[i].client.player.playerReplicationInfo.team].TeamName$".", teamColor[sortedATBClients[i].client.player.playerReplicationInfo.team]);
     FlashMessageToPlayer(sortedATBClients[i].client, "Say !o to open the Nexgen control panel.", colorWhite, 1);     
-    if(teamSound[sortedATBClients[i].client.player.playerReplicationInfo.team] != none) sortedATBClients[i].client.player.clientPlaySound(teamSound[sortedATBClients[i].client.player.playerReplicationInfo.team],  ,true);
+    if(teamSound[sortedATBClients[i].client.player.playerReplicationInfo.team] != none) sortedATBClients[i].client.player.clientPlaySound(teamSound[sortedATBClients[i].client.player.playerReplicationInfo.team], , true);
   }
   
   // Reset counters
@@ -569,6 +573,11 @@ function midGameJoinTeamSorting(int midGameJoinToSort) {
   midGameJoinTeamSortingTime = Level.TimeSeconds;
 }
 
+/***************************************************************************************************
+ *
+ *  $DESCRIPTION  Called by an ATBClient instance when it is ready to be sorted.
+ *
+ **************************************************************************************************/
 function ATBClientInit(NexgenATBClient ATBClient) {
   local int midGameJoinToSort;
   local bool bBetterWait;
@@ -576,11 +585,8 @@ function ATBClientInit(NexgenATBClient ATBClient) {
   if(control.gInf == none) return;
 
   if( (control.gInf.gameState == control.gInf.GS_Waiting && initialTeamSortTime != 0.0) ||
-       control.gInf.gameState == control.gInf.GS_Starting) {
-    // Player did not get considered for initial team sorting
-    // TODO
-  } else if(control.gInf.gameState == control.gInf.GS_Playing) {
-    // Player initialized mid-game
+       control.gInf.gameState == control.gInf.GS_Starting ||
+       control.gInf.gameState == control.gInf.GS_Playing) {
     
     // Check for other waiting clients
     for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
@@ -590,7 +596,7 @@ function ATBClientInit(NexgenATBClient ATBClient) {
       }
     }
     
-    if(!bBetterWait && midGameJoinTeamSortingTime == 0.0) {
+    if(!bBetterWait && midGameJoinTeamSortingTime == 0.0 && longestMidGameJoinWaitTime != 0.0 && (Level.TimeSeconds - longestMidGameJoinWaitTime) > minMidGameJoinWaitTime) {
       midGameJoinTeamSorting(midGameJoinToSort);
     } else if(longestMidGameJoinWaitTime == 0) {
       longestMidGameJoinWaitTime = Level.TimeSeconds;
@@ -598,7 +604,11 @@ function ATBClientInit(NexgenATBClient ATBClient) {
   }
 }
 
-// Taken from ATB 1.5
+/***************************************************************************************************
+ *
+ *  $DESCRIPTION  Overrides the progress messages. Taken from ATB 1.5.
+ *
+ **************************************************************************************************/
 function FlashMessageToPlayer(NexgenClient client, string Msg, Color msgColor, optional int offset) {
   local int targetLine;
   
@@ -620,11 +630,20 @@ function FlashMessageToPlayer(NexgenClient client, string Msg, Color msgColor, o
   client.player.SetProgressMessage(Msg,targetLine+offset);  
 }
 
+/***************************************************************************************************
+ *
+ *  $DESCRIPTION  Team strengths including flag bonus
+ *
+ **************************************************************************************************/
 function int getTeamStrengthWithFlagStrength(byte teamNum) {
   return teamStrength[teamNum] + TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[teamNum].Score * xConf.flagStrength;
 }
 
-// Without players waiting for team assignment
+/***************************************************************************************************
+ *
+ *  $DESCRIPTION  Retrieves team sizes excluding players waiting for team assignment
+ *
+ **************************************************************************************************/
 function int getTeamSizes(out int teamSizes[2]) {
   local NexgenATBClient ATBClient;
 
