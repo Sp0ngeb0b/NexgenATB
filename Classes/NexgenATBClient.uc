@@ -11,12 +11,14 @@ var int configIndex;
 var int strength;
 
 // Miscellaneous 
-var bool bTeamAssigned;       
-var bool bMidGameJoin;
-var bool bTeamSwitched;
+var bool  bTeamAssigned;       
+var bool  bMidGameJoin;
+var bool  bTeamSwitched;
+var float playTime;
  
 // Control variables
 var bool bSortedByStrenth;
+var int strengthRating;
 var bool bInitialized;
 var bool locatingEntry;
 var int lastChecked;

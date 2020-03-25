@@ -27,13 +27,18 @@ var Color colorWhite, colorOrange, TeamColor[4];
 
 const PA_ConfIndex = "natb_configIndex";
 const PA_Strength  = "natb_strength";
+const PA_PlayTime  = "natb_playTime";
 
-const minSinglePlayerWaitTime = 8.0;           // Min amount of seconds a single player in the server has to wait before the game starts
-const maxInitWaitTime         = 5.0;           // Max amount of seconds the initial sorting can be delayed when waiting for a client to init
-const gameStartDelay          = 2.5;           // Amount of seconds to wait after a team is assigned before proceeding
-const minMidGameJoinWaitTime  = 3.0;           // Min amount of seconds a mid-game joined player waits for team assignment (starting at ATBClient initialization) 
-const maxMidGameJoinWaitTime  = 5.0;           // Max amount of seconds until a team is assigned for mid-game joined players (starting at ATBClient initialization) 
-const maxReconnectWaitTime    = 8.0;           // Max amount of seconds to wait for a player to reconnect. Teams will not be rebalanced until then, except new player join. 
+const minSinglePlayerWaitTime  = 8.0;          // Min amount of seconds a single player in the server has to wait before the game starts
+const maxInitWaitTime          = 5.0;          // Max amount of seconds the initial sorting can be delayed when waiting for a client to init
+const gameStartDelay           = 2.5;          // Amount of seconds to wait after a team is assigned before proceeding
+const minMidGameJoinWaitTime   = 3.0;          // Min amount of seconds a mid-game joined player waits for team assignment (starting at ATBClient initialization) 
+const maxMidGameJoinWaitTime   = 5.0;          // Max amount of seconds until a team is assigned for mid-game joined players (starting at ATBClient initialization) 
+const maxReconnectWaitTime     = 8.0;          // Max amount of seconds to wait for a player to reconnect. Teams will not be rebalanced until then, except new player join. 
+
+const oddPlayerChangeThreshold = 10;           // Threshold in strength difference improvement after which the last player will switch teams in case off an odd player amount
+const prefToChangeNewPlayers   = 0.5;          // Factor how to weight playtime into mid-game rebalances [0,1]. 
+const flagCarrierFactor        = 10.0;         // Rating punishment if client is a flag carrier (>=1).
 
 /***************************************************************************************************
  *
@@ -141,7 +146,8 @@ function playerJoined(NexgenClient client) {
       if(client.playerID == lastDisconnectID && (Level.TimeSeconds - lastDisconnectTime) <= maxReconnectWaitTime) {
         ATBClient.configIndex = client.pDat.getInt(PA_ConfIndex, -1);
         ATBClient.strength    = client.pDat.getInt(PA_Strength,  xConf.defaultStrength);
-        
+        ATBClient.playTime   += client.pDat.getInt(PA_PlayTime,  0);
+
         lastDisconnectID = "";
         
         if(ATBClient.configIndex != -1) {
@@ -193,6 +199,7 @@ function playerLeft(NexgenClient client) {
       lastDisconnectTeam = client.player.playerReplicationInfo.team;
       client.pDat.set(PA_ConfIndex,  ATBClient.configIndex);
       client.pDat.set(PA_Strength,   ATBClient.strength);
+      client.pDat.set(PA_PlayTime,   ATBClient.playTime+client.timeSeconds);
     }
     
     ATBClient.destroy();
@@ -384,11 +391,9 @@ function tick(float deltaTime) {
   if(control.gInf != none && control.gInf.gameState == control.gInf.GS_Starting) { 
     for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
       if(!ATBClient.client.bSpectator) {
-        // Clear progress messages
         if(!ATBClient.bMidGameJoin) {
-          for(i=0; i<7; i++) {
-            ATBClient.client.player.SetProgressMessage("", i);
-          }
+          // Clear progress messages
+          for(i=0; i<7; i++) ATBClient.client.player.SetProgressMessage("", i);
         } else {
           // Latecomer
           if(!ATBClient.bTeamAssigned) {
@@ -398,9 +403,7 @@ function tick(float deltaTime) {
           } else {
             if(midGameJoinTeamSortingTime != 0.0 && (Level.TimeSeconds - midGameJoinTeamSortingTime) > gameStartDelay) {
               // Clear progress message
-              for(i=0; i<7; i++) {
-                ATBClient.client.player.SetProgressMessage("", i);
-              }
+              for(i=0; i<7; i++) ATBClient.client.player.SetProgressMessage("", i);
             } else {
               FlashMessageToPlayer(ATBClient.client, "You are on "$TeamGamePlus(Level.Game).Teams[ATBClient.client.player.playerReplicationInfo.team].TeamName$".", teamColor[ATBClient.client.player.playerReplicationInfo.team]);
               FlashMessageToPlayer(ATBClient.client, "Say !o to open the Nexgen control panel.", colorWhite, 1);     
@@ -425,9 +428,8 @@ function tick(float deltaTime) {
         } else {
           if(midGameJoinTeamSortingTime != 0.0 && (Level.TimeSeconds - midGameJoinTeamSortingTime) > gameStartDelay) {
             // Clear progress message
-            for(i=0; i<7; i++) {
-              ATBClient.client.player.SetProgressMessage("", i);
-            }
+            for(i=0; i<7; i++) ATBClient.client.player.SetProgressMessage("", i);
+            
             // Play announcer
             if(playSound != none) ATBClient.client.player.clientPlaySound(playSound, , true);
             
@@ -490,7 +492,7 @@ function virtualTimer() {
         // Wait for reconnect?
         if(lastDisconnectID == "" || (Level.TimeSeconds - lastDisconnectTime) > maxReconnectWaitTime) {
           // No, rebalance now!
-          midGameRebalance();
+          midGameRebalanceTeamSize();
         }
       }
     }
@@ -504,8 +506,8 @@ function virtualTimer() {
  *
  **************************************************************************************************/
 function sortNewClientsByStrength(int amount, out NexgenATBClient sortedATBClients[32]) {
-  local int i, max;
   local NexgenATBClient ATBClient, maxATBClient; 
+  local int i, max;
   
   // Reset sorted flag
   for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
@@ -541,8 +543,8 @@ function sortNewClientsByStrength(int amount, out NexgenATBClient sortedATBClien
  *
  **************************************************************************************************/
 function sortTeamClientsByStrength(int amount, byte team, out NexgenATBClient sortedATBClients[32]) {
-  local int i, max;
   local NexgenATBClient ATBClient, maxATBClient; 
+  local int i, max;
 
   // Reset sorted flag
   for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
@@ -570,6 +572,34 @@ function sortTeamClientsByStrength(int amount, byte team, out NexgenATBClient so
     sortedATBClients[i] = maxATBClient;   
     maxATBClient.bSortedByStrenth = true;    
   }
+}
+
+/***************************************************************************************************
+ *
+ *  $DESCRIPTION  Returns the best possible switch by rating each client.
+ *                This rating considers the goal strength difference to fulfill, as well as the
+ *                playtime of the clients and whether they carry the flag.
+ *                A low rating is desired.
+ *
+ **************************************************************************************************/
+function NexgenATBClient getBestSwitch(byte team, int difference) {
+  local NexgenATBClient ATBClient, minATBClient; 
+  local int newDifference;
+  local float playTime;
+
+  // Compute strength rating and find min
+  for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
+    if(ATBClient.client.player.playerReplicationInfo.team == team) {
+      newDifference = abs(difference - ATBClient.strength*2);
+      playTime = ATBClient.playTime+ATBClient.client.timeSeconds;
+      ATBClient.strengthRating = 200*(5+newDifference) * (1.0-prefToChangeNewPlayers) + 2.0*playTime * prefToChangeNewPlayers; // Magic formular taken from ATB
+      
+      if(ATBClient.client.player.playerReplicationInfo.hasFlag != none) ATBClient.strengthRating *= flagCarrierFactor;
+      
+      if(minATBClient == none || minATBClient.strengthRating > ATBClient.strengthRating) minATBClient = ATBClient;
+    }
+  } 
+  return minATBClient;
 }
 
 /***************************************************************************************************
@@ -700,26 +730,27 @@ function midGameJoinTeamSorting(int midGameJoinToSort) {
  *                No waiting clients must be ensured.
  *
  **************************************************************************************************/
-function midGameRebalance() {
-  local NexgenATBClient sortedATBClientsSmallerTeam[32], sortedATBClientsLargerTeam[32];
+function midGameRebalanceTeamSize() {
+  local NexgenATBClient sortedATBClientsLargerTeam[32];
+  local NexgenATBClient preferedATBClient;
   local int teamSizes[2];
-  local int largerTeam, smallerTeam, difference;
+  local int largerTeam, smallerTeam, sizeDifference, strengthDifference;
   local int nextPlayerToMove;
+  local int movedPlayerAmount;
+  local int i;
   
   // Figure out what to do
   getTeamSizes(teamSizes);
   if(teamSizes[1] > teamSizes[0]) largerTeam = 1;
   smallerTeam = int(!bool(largerTeam));
   
-  difference = abs(teamSizes[0] - teamSizes[1]);
-  if(difference <= 1) return;
-  
-  // Get sorted strenghts
-  sortTeamClientsByStrength(teamSizes[smallerTeam], smallerTeam, sortedATBClientsSmallerTeam);
-  sortTeamClientsByStrength(teamSizes[largerTeam], largerTeam, sortedATBClientsLargerTeam);
+  sizeDifference = abs(teamSizes[0] - teamSizes[1]);
+  if(sizeDifference <= 1) return;
 
   // Oops, larger team is weaker than then smaller team! Move weakest players.
   if(getTeamStrengthWithFlagStrength(largerTeam) < getTeamStrengthWithFlagStrength(smallerTeam)) {
+    // Get sorted strenghts
+    sortTeamClientsByStrength(teamSizes[largerTeam], largerTeam, sortedATBClientsLargerTeam);
     nextPlayerToMove = teamSizes[largerTeam] - 1;
     do {
       if(sortedATBClientsLargerTeam[nextPlayerToMove].client.player.playerReplicationInfo.hasFlag != none) nextPlayerToMove--;
@@ -727,15 +758,43 @@ function midGameRebalance() {
       assignTeam(sortedATBClientsLargerTeam[nextPlayerToMove], smallerTeam);
       teamStrength[largerTeam]  -= sortedATBClientsLargerTeam[nextPlayerToMove].strength;
       teamStrength[smallerTeam] += sortedATBClientsLargerTeam[nextPlayerToMove].strength;
-      FlashMessageToPlayer(sortedATBClientsLargerTeam[nextPlayerToMove].client, "You have been switched to the "$TeamGamePlus(Level.Game).Teams[smallerTeam].TeamName$" due to team unbalance.", teamColor[smallerTeam]);
-    
+      
+      // Inform player
+      for(i=0; i<7; i++)   sortedATBClientsLargerTeam[nextPlayerToMove].client.player.SetProgressMessage("", i);
+      FlashMessageToPlayer(sortedATBClientsLargerTeam[nextPlayerToMove].client, "Assigned to "$TeamGamePlus(Level.Game).Teams[smallerTeam].TeamName$" due to unbalanced team sizes!", teamColor[smallerTeam]);
+      
+      movedPlayerAmount++;
       nextPlayerToMove--;
-      difference -= 2;
-    } until(difference <= 1);
+      sizeDifference -= 2;
+    } until(sizeDifference <= 1);
   
-  } else {
-    // Find best appropriate switch candidate
+  } else {    
+    do {
+      strengthDifference = getTeamStrengthWithFlagStrength(largerTeam) - getTeamStrengthWithFlagStrength(smallerTeam);
+      preferedATBClient = getBestSwitch(largerTeam, strengthDifference);
+      
+      // Manual check when player amount is odd
+      if(sizeDifference == 1 && strengthDifference < abs(strengthDifference-preferedATBClient.strength*2)+oddPlayerChangeThreshold) {
+        break;
+      }
+     
+      assignTeam(preferedATBClient, smallerTeam);
+      teamStrength[largerTeam]  -= preferedATBClient.strength;
+      teamStrength[smallerTeam] += preferedATBClient.strength;
+      
+      // Inform player 
+      for(i=0; i<7; i++)   preferedATBClient.client.player.SetProgressMessage("", i);
+      FlashMessageToPlayer(preferedATBClient.client, "Assigned to "$TeamGamePlus(Level.Game).Teams[smallerTeam].TeamName$" due to unbalanced team sizes!", teamColor[smallerTeam]);
+
+      movedPlayerAmount++;
+      sizeDifference -= 2;
+    } until(sizeDifference < 1);
+    
   }
+  
+  // Announce strengths
+  control.broadcastMsg("<C04>Nexgen Auto Team Balancer moved "$movedPlayerAmount$" player(s) due to unbalanced team sizes!");
+  control.broadcastMsg("<C04>Red team strength is "$getTeamStrengthWithFlagStrength(0)$", Blue team strength is "$getTeamStrengthWithFlagStrength(1)$".");
   
   // Reset
   lastDisconnectID = "";
@@ -764,9 +823,11 @@ function ATBClientInit(NexgenATBClient ATBClient) {
       }
     }
     
+    // Sort now?
     if(!bBetterWait && midGameJoinTeamSortingTime == 0.0 && longestMidGameJoinWaitTime != 0.0 && (Level.TimeSeconds - longestMidGameJoinWaitTime) > minMidGameJoinWaitTime) {
       midGameJoinTeamSorting(midGameJoinToSort);
     } else if(longestMidGameJoinWaitTime == 0) {
+      // First client waiting, sort later
       longestMidGameJoinWaitTime = Level.TimeSeconds;
     }
   }
@@ -791,7 +852,7 @@ function FlashMessageToPlayer(NexgenClient client, string Msg, Color msgColor, o
   if (Level.Game.Class.IsA('Assault'))
    targetLine = 2;
   if (Level.NetMode==NM_Standalone)
-   targetLine = 2; // At lease true for CTF
+   targetLine = 2; // At least true for CTF
 
   client.player.SetProgressTime(5);
   client.player.SetProgressColor(msgColor,targetLine+offset);
