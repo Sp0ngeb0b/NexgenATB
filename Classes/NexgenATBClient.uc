@@ -17,7 +17,7 @@ var bool  bTeamSwitched;
 var float playTime;
  
 // Control variables
-var bool bSortedByStrenth;
+var bool bSortedByStrength;
 var int strengthRating;
 var bool bInitialized;
 var bool locatingEntry;

@@ -40,6 +40,10 @@ const oddPlayerChangeThreshold = 10;           // Threshold in strength differen
 const prefToChangeNewPlayers   = 0.5;          // Factor how to weight playtime into mid-game rebalances [0,1]. 
 const flagCarrierFactor        = 10.0;         // Rating punishment if client is a flag carrier (>=1).
 
+const newLineToken = "\\n";                    // Token used to detect new lines in texts
+
+const bWindowedStrengthMsgs = false;
+
 /***************************************************************************************************
  *
  *  $DESCRIPTION  Initializes the plugin. Note that if this function returns false the plugin will
@@ -511,7 +515,7 @@ function sortNewClientsByStrength(int amount, out NexgenATBClient sortedATBClien
   
   // Reset sorted flag
   for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
-    ATBClient.bSortedByStrenth = false;
+    ATBClient.bSortedByStrength = false;
   }
   
   // Sort
@@ -519,7 +523,7 @@ function sortNewClientsByStrength(int amount, out NexgenATBClient sortedATBClien
     max = -1;
     
     for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
-      if(!ATBClient.bInitialized || ATBClient.bSortedByStrenth) continue;
+      if(!ATBClient.bInitialized || ATBClient.bSortedByStrength) continue;
       
       if(ATBClient.strength > max) {
         maxATBClient = ATBClient;
@@ -533,7 +537,7 @@ function sortNewClientsByStrength(int amount, out NexgenATBClient sortedATBClien
     }
     
     sortedATBClients[i] = maxATBClient;   
-    maxATBClient.bSortedByStrenth = true;    
+    maxATBClient.bSortedByStrength = true;    
   }
 }
 
@@ -548,7 +552,7 @@ function sortTeamClientsByStrength(int amount, byte team, out NexgenATBClient so
 
   // Reset sorted flag
   for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
-    ATBClient.bSortedByStrenth = false;
+    ATBClient.bSortedByStrength = false;
   }
   
   // Sort
@@ -556,7 +560,7 @@ function sortTeamClientsByStrength(int amount, byte team, out NexgenATBClient so
     max = -1;
     
     for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
-      if(ATBClient.bSortedByStrenth || ATBClient.client.player.playerReplicationInfo.team != team) continue;
+      if(ATBClient.bSortedByStrength || ATBClient.client.player.playerReplicationInfo.team != team) continue;
       
       if(ATBClient.strength > max) {
         maxATBClient = ATBClient;
@@ -570,7 +574,7 @@ function sortTeamClientsByStrength(int amount, byte team, out NexgenATBClient so
     }
     
     sortedATBClients[i] = maxATBClient;   
-    maxATBClient.bSortedByStrenth = true;    
+    maxATBClient.bSortedByStrength = true;    
   }
 }
 
@@ -747,7 +751,7 @@ function midGameRebalanceTeamSize() {
   sizeDifference = abs(teamSizes[0] - teamSizes[1]);
   if(sizeDifference <= 1) return;
 
-  // Oops, larger team is weaker than then smaller team! Move weakest players.
+  // Oops, larger team is weaker than the smaller team! Move weakest players.
   if(getTeamStrengthWithFlagStrength(largerTeam) < getTeamStrengthWithFlagStrength(smallerTeam)) {
     // Get sorted strenghts
     sortTeamClientsByStrength(teamSizes[largerTeam], largerTeam, sortedATBClientsLargerTeam);
@@ -910,6 +914,7 @@ function getTeamSizes(out int teamSizes[2], optional bool bExcludeWaitingPlayers
 function bool handleOurMsgCommands(PlayerPawn sender, string msg) {
 	local string cmd;
 	local bool bIsCommand;
+  local int teamStrenthToShow;
   local NexgenClient client;
   
   client = control.getClient(sender);
@@ -918,22 +923,68 @@ function bool handleOurMsgCommands(PlayerPawn sender, string msg) {
 
 	cmd = class'NexgenUtil'.static.trim(msg);
 	bIsCommand = true;
+  teamStrenthToShow = -1;
 	switch (cmd) {
-		case "!teams":
-    case "!team":
-    case "!t":
-    case "!stats":
+		case "!teams": case "!team": case "!t": case "!stats":
       if(initialTeamSortTime == 0) client.showMsg("<C00>Teams not yet assigned.");
-      else                         client.showMsg("<C04>Red team strength is "$getTeamStrengthWithFlagStrength(0)$", Blue team strength is "$getTeamStrengthWithFlagStrength(1)$" (difference -"$int(abs(getTeamStrengthWithFlagStrength(0)-getTeamStrengthWithFlagStrength(1)))$").");
+      else { 
+        client.showMsg("<C04>Red team strength is "$getTeamStrengthWithFlagStrength(0)$", Blue team strength is "$getTeamStrengthWithFlagStrength(1)$" (difference -"$int(abs(getTeamStrengthWithFlagStrength(0)-getTeamStrengthWithFlagStrength(1)))$").");
+        client.showMsg("<C04>Say '!strength' for more details.");
+      }
     break;
     
+    // Detailed strength info requested?
+    case "!strength": client.showMsg("<C04>Usage: '!strength <red/blue>'"); break;
+    case "!strength red": case "!strength 0":  teamStrenthToShow = 0; break;
+    case "!strength blue": case "!strength 1": teamStrenthToShow = 1; break;
+
     // Not a command.
 		default: bIsCommand = false;
 	}
+  
+  // Display detailed strength info via Nexgen's PM function (proper formatting and accessible as server side only plugin)
+  if(teamStrenthToShow != -1) {
+    NexgenClientCore(client.getController(class'NexgenClientCore'.default.ctrlID)).receivePM(client.playerID, client.player.playerReplicationInfo, getStrengthsString(teamStrenthToShow), bWindowedStrengthMsgs, true);
+    if(!bWindowedStrengthMsgs) client.showPanel(class'NexgenRCPPrivateMsg'.default.panelIdentifier);
+  }
 
 	return bIsCommand;  
 }
    
+/***************************************************************************************************
+ *
+ *  $DESCRIPTION  Constructs a string containing the (sorted) strength of each member of a team.
+ *
+ **************************************************************************************************/
+function string getStrengthsString(byte team) {
+  local string res, seperatorToken;
+  local int teamSizes[2];
+  local NexgenATBClient sortedATBClients[32];
+  local int i;
+  
+  // Sort by strength
+  getTeamSizes(teamSizes, true);
+  sortTeamClientsByStrength(teamSizes[team], team, sortedATBClients);
+  
+  // Which mode?
+  if(bWindowedStrengthMsgs) seperatorToken = "  |  ";
+  else {
+    seperatorToken = newLineToken;
+    res = newLineToken$newLineToken;
+  }
+  
+  // Construct string
+  res = res$"Nexgen Auto Team Balance "$TeamGamePlus(Level.Game).Teams[team].TeamName$" Team Strengths:"$newLineToken;
+  if(!bWindowedStrengthMsgs) res = res $newLineToken;
+  for(i=0; i<teamSizes[team]; i++) {
+    res = res$sortedATBClients[i].client.playerName$": "$string(sortedATBClients[i].strength);
+    if(i != teamSizes[team]-1) res = res$seperatorToken;
+  }
+  
+  return res;
+}
+
+
 /***************************************************************************************************
  *
  *  $DESCRIPTION  Default properties block.
