@@ -23,8 +23,7 @@ var byte   lastDisconnectTeam;
 var Sound startSound, playSound, teamSound[2];
 
 // Colors
-var Color colorWhite, colorOrange;
-var Color TeamColor[4];
+var Color colorWhite, colorOrange, TeamColor[4];
 
 const PA_ConfIndex = "natb_configIndex";
 const PA_Strength  = "natb_strength";
@@ -68,6 +67,7 @@ function bool initialize() {
   teamSound[0] = Sound(dynamicLoadObject(xConf.teamSound[0], class'Sound'));
   teamSound[1] = Sound(dynamicLoadObject(xConf.teamSound[1], class'Sound'));
 
+  spawn(class'NexgenATBMessageMutator', self);
   //control.teamBalancer = spawn(class'URSTBDisabler', self);
   
   return true;
@@ -626,10 +626,8 @@ function initialTeamSorting(int numPlayersInitialized) {
   }
   
   // Announce strengths
-  for (client = control.clientList; client != none; client = client.nextClient) {
-    client.showMsg("<C04>Nexgen Auto Team Balancer is assigning teams...");
-    client.showMsg("<C04>Red team strength is "$teamStrength[0]$", Blue team strength is "$teamStrength[1]$".");
-  }
+  control.broadcastMsg("<C04>Nexgen Auto Team Balancer is assigning teams...");
+  control.broadcastMsg("<C04>Red team strength is "$teamStrength[0]$", Blue team strength is "$teamStrength[1]$".");
 }
 
 /***************************************************************************************************
@@ -848,7 +846,7 @@ function getTeamSizes(out int teamSizes[2], optional bool bExcludeWaitingPlayers
  *  $OVERRIDE
  *
  **************************************************************************************************/
-function bool handleMsgCommand(PlayerPawn sender, string msg) {
+function bool handleOurMsgCommands(PlayerPawn sender, string msg) {
 	local string cmd;
 	local bool bIsCommand;
   local NexgenClient client;
@@ -862,8 +860,8 @@ function bool handleMsgCommand(PlayerPawn sender, string msg) {
 	switch (cmd) {
 		case "!teams":
     case "!team":
+    case "!t":
     case "!stats":
-    case "!natb":
       if(initialTeamSortTime == 0) client.showMsg("<C00>Teams not yet assigned.");
       else                         client.showMsg("<C04>Red team strength is "$getTeamStrengthWithFlagStrength(0)$", Blue team strength is "$getTeamStrengthWithFlagStrength(1)$" (difference -"$int(abs(getTeamStrengthWithFlagStrength(0)-getTeamStrengthWithFlagStrength(1)))$").");
     break;
