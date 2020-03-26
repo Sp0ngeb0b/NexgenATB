@@ -50,7 +50,11 @@ event tick(float deltaTime) {
         // New Entry
         configIndex = i;
         strength = xConf.defaultStrength;
-        initalized();
+        initialized();
+        
+        // Write initial data to config entry
+        xConf.playerData[i] = client.playerID;
+        
         return;
       } else {
         class'NexgenUtil'.static.split(xConf.playerData[i], ID, remaining);
@@ -58,7 +62,7 @@ event tick(float deltaTime) {
           configIndex = i;
           class'NexgenUtil'.static.split(remaining, strengthStr, remaining);
           strength = int(strengthStr);
-          initalized();
+          initialized();
           return;
         }
       }
@@ -68,7 +72,7 @@ event tick(float deltaTime) {
   if(i == ArrayCount(xConf.playerData)) {
     configIndex = ArrayCount(xConf.playerData)-1;
     strength = xConf.defaultStrength;
-    initalized();
+    initialized();
   }
 }
 
@@ -76,7 +80,7 @@ function locateDataEntry() {
   locatingEntry = true;
 }
 
-function initalized() {
+function initialized() {
   bInitialized = true;
   locatingEntry = false;
   disable('Tick');
@@ -88,7 +92,6 @@ function initalized() {
  *  $DESCRIPTION  Default properties block.
  *
  **************************************************************************************************/
-
 defaultproperties
 {
      RemoteRole=ROLE_None

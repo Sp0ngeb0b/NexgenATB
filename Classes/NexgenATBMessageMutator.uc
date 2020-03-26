@@ -19,7 +19,7 @@ function preBeginPlay() {
   ATBControl = NexgenATB(Owner);
 
   // This is called after Nexgen's preBeginPlay so we will be in front of it in the chain
-	level.game.registerMessageMutator(self);
+  level.game.registerMessageMutator(self);
   
   // Get next message mutator beside Nexgen and NexgenPlus
   otherNextMessageMutator = nextMessageMutator;
@@ -36,12 +36,12 @@ function preBeginPlay() {
 function bool mutatorTeamMessage(Actor sender, Pawn receiver, PlayerReplicationInfo pri,
                                  coerce string s, name type, optional bool bBeep) {
   local bool bATBCommand;
-	
-	// Check for commands.
-	if (sender != none && sender.isA('PlayerPawn') && sender == receiver &&
-	    (type == 'Say' || type == 'TeamSay')) {
-		if(ATBControl.handleOurMsgCommands(PlayerPawn(sender), s)) bATBCommand = true;
-	}
+  
+  // Check for commands.
+  if (sender != none && sender.isA('PlayerPawn') && sender == receiver &&
+      (type == 'Say' || type == 'TeamSay')) {
+    if(ATBControl.handleOurMsgCommands(PlayerPawn(sender), s)) bATBCommand = true;
+  }
   
   // Allow other message mutators to do their job.
   if(bATBCommand) {
@@ -49,7 +49,7 @@ function bool mutatorTeamMessage(Actor sender, Pawn receiver, PlayerReplicationI
       return otherNextMessageMutator.mutatorTeamMessage(sender, receiver, pri, s, type, bBeep);
     } else {
       return true;
-    }	
+    } 
   } else {
     if (nextMessageMutator != none) {
       return nextMessageMutator.mutatorTeamMessage(sender, receiver, pri, s, type, bBeep);
@@ -66,22 +66,22 @@ function bool mutatorTeamMessage(Actor sender, Pawn receiver, PlayerReplicationI
  **************************************************************************************************/
 function bool mutatorBroadcastMessage(Actor sender, Pawn receiver, out coerce string msg,
                                       optional bool bBeep, out optional name type) {
-	local PlayerReplicationInfo senderPRI;
-	local bool bIsSpecMessage, bATBCommand;
+  local PlayerReplicationInfo senderPRI;
+  local bool bIsSpecMessage, bATBCommand;
 
-	// Get sender player replication info.
-	if (sender != none && sender.isA('Pawn')) {
-		senderPRI = Pawn(sender).playerReplicationInfo;
-	}
-	
-	// Check if we're dealing with a spectator chat message.
-	bIsSpecMessage = senderPRI != none && sender.isA('Spectator') &&
-	                 left(msg, len(senderPRI.playerName) + 1) ~= (senderPRI.playerName $ ":");
-	
-	// Check for commands.
-	if (bIsSpecMessage && sender == receiver) {
-		if(ATBControl.handleOurMsgCommands(PlayerPawn(sender), mid(msg, len(senderPRI.playerName) + 1))) bATBCommand = true;
-	}
+  // Get sender player replication info.
+  if (sender != none && sender.isA('Pawn')) {
+    senderPRI = Pawn(sender).playerReplicationInfo;
+  }
+
+  // Check if we're dealing with a spectator chat message.
+  bIsSpecMessage = senderPRI != none && sender.isA('Spectator') &&
+                   left(msg, len(senderPRI.playerName) + 1) ~= (senderPRI.playerName $ ":");
+
+  // Check for commands.
+  if (bIsSpecMessage && sender == receiver) {
+    if(ATBControl.handleOurMsgCommands(PlayerPawn(sender), mid(msg, len(senderPRI.playerName) + 1))) bATBCommand = true;
+  }
   
   // Allow other message mutators to do their job.
   if(bATBCommand) {
@@ -89,7 +89,7 @@ function bool mutatorBroadcastMessage(Actor sender, Pawn receiver, out coerce st
       return otherNextMessageMutator.mutatorBroadcastMessage(sender, receiver, msg, bBeep, type);
     } else {
       return true;
-    }	
+    } 
   } else {
     if (nextMessageMutator != none) {
       return nextMessageMutator.mutatorBroadcastMessage(sender, receiver, msg, bBeep, type);

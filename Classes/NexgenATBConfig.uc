@@ -8,7 +8,6 @@ var config int defaultStrength;
 var config int flagStrength;
 var config string playerData[2048]; // ID#Strength#Date
 
-
 defaultproperties {
  startSound="UrSGrappleSounds.Start",
  playSound="UrSGrappleSounds.Play",

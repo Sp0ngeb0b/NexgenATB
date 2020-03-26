@@ -1,34 +1,36 @@
 class NexgenATB extends NexgenPlugin;
 
+// References
 var NexgenATBConfig xConf;                     // Plugin configuration.
+var NexgenATBClient ATBClientList;             // First client of our own client list.
 
-var NexgenATBClient ATBClientList;
-var int numCurrPlayers;
+// Team specific vars
+var int teamStrength[2];                       // Current accumulated strength of the teams (without flag strength) 
+var float  teamScore[2];                       // Last known team score, used to detect changes of accumulated flag strength.
 
-var float waitFinishTime;
-var float initialTeamSortTime;
+// Time vars
+var float waitFinishTime;                      // Time at which the initial waiting timer at gamestart ran out 
+var float initialTeamSortTime;                 // Time at which the initial team sorting took place
+var float midGameJoinTeamSortingTime;          // Time at which the latest mid-game-join sorting took place. Will be reset to 0 once players left waiting mode.
+var float longestMidGameJoinWaitTime;          // Time at which the earliest mid-game-joined client was ready to be sorted.
+var float lastDisconnectTime;                  // Last time a player disconnected.
+var float lastStrengthChangeTime;              // Last time the strength of the teams was modified.
 
-var int teamStrength[2];
+// Other vars
+var int numCurrPlayers;                        // Current amount of players (can be in waiting state). Used to detect when only a single player is connected.
 
-// Mid-game join vars
-var float midGameJoinTeamSortingTime;
-var float longestMidGameJoinWaitTime;
-
-// Reconnect vars
-var float  lastDisconnectTime;
-var string lastDisconnectID;
-var byte   lastDisconnectTeam;
-
-// Sounds
+// Resources
 var Sound startSound, playSound, teamSound[2];
-
-// Colors
 var Color colorWhite, colorOrange, TeamColor[4];
 
-const PA_ConfIndex = "natb_configIndex";
-const PA_Strength  = "natb_strength";
-const PA_PlayTime  = "natb_playTime";
+// Identifiers used for storing data of disconnected players
+const PA_ConfIndex             = "natb_configIndex";
+const PA_Strength              = "natb_strength";
+const PA_PlayTime              = "natb_playTime";
+const PA_Team                  = "natb_team";
+const PA_DisconnectTime        = "natb_disconnectTime";
 
+// Constants
 const minSinglePlayerWaitTime  = 8.0;          // Min amount of seconds a single player in the server has to wait before the game starts
 const maxInitWaitTime          = 5.0;          // Max amount of seconds the initial sorting can be delayed when waiting for a client to init
 const gameStartDelay           = 2.5;          // Amount of seconds to wait after a team is assigned before proceeding
@@ -40,9 +42,11 @@ const oddPlayerChangeThreshold = 10;           // Threshold in strength differen
 const prefToChangeNewPlayers   = 0.5;          // Factor how to weight playtime into mid-game rebalances [0,1]. 
 const flagCarrierFactor        = 10.0;         // Rating punishment if client is a flag carrier (>=1).
 
+const bWindowedStrengthMsgs = false;           // Whether to print the detailed strength info as a windowed PM. This avoids the client message on the top left, but there must be
+                                               // several players per line. If this is set to false, proper formatting with one player per line is possible in the PM history tab,
+                                               // but the client message on the top left will be displayed.
+                                               
 const newLineToken = "\\n";                    // Token used to detect new lines in texts
-
-const bWindowedStrengthMsgs = false;
 
 /***************************************************************************************************
  *
@@ -63,7 +67,7 @@ function bool initialize() {
     TeamGamePlus(Level.Game).bBalanceTeams = false;
   }
 
-	// Load settings.
+  // Load settings.
   if (control.bUseExternalConfig) {
     xConf = spawn(class'NexgenATBConfigExt', self);
   } else {
@@ -100,35 +104,12 @@ function clientCreated(NexgenClient client) {
   ATBClient = spawn(class'NexgenATBClient', self);
   ATBClient.client = client;
   ATBClient.xControl = self;
-	ATBClient.xConf = xConf;
+  ATBClient.xConf = xConf;
   
   // Add to list
   ATBClient.nextATBClient = ATBClientList;
   ATBClientList = ATBClient;
   numCurrPlayers++;
-}
-
-/***************************************************************************************************
- *
- *  $DESCRIPTION  Locates the NexgenATBClient instance for the given actor.
- *  $PARAM        a  The actor for which the extended client handler instance is to be found.
- *  $REQUIRE      a != none
- *  $RETURN       The client handler for the given actor.
- *  $ENSURE       (!a.isA('PlayerPawn') ? result == none : true) &&
- *                imply(result != none, result.client.owner == a)
- *
- **************************************************************************************************/
-function NexgenATBClient getATBClient(NexgenClient client) {
-  local NexgenATBClient ATBClient;
-  
-  if (client != none && !client.bSpectator) {
-    for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
-      if(ATBClient.client == client) {
-        return ATBClient;
-      }
-    }
-  }
-  return none;
 }
 
 /***************************************************************************************************
@@ -141,31 +122,39 @@ function NexgenATBClient getATBClient(NexgenClient client) {
  **************************************************************************************************/
 function playerJoined(NexgenClient client) {
   local NexgenATBClient ATBClient;
+  local float disconnectTime;
+  local int team;
 
   if(control.gInf != none) {
     ATBClient = getATBClient(client);
     
     if(ATBClient != none) {
+      disconnectTime = client.pDat.getFloat(PA_DisconnectTime, 0);
+    
       // Reconnect?
-      if(client.playerID == lastDisconnectID && (Level.TimeSeconds - lastDisconnectTime) <= maxReconnectWaitTime) {
+      if(disconnectTime > 0) {
         ATBClient.configIndex = client.pDat.getInt(PA_ConfIndex, -1);
         ATBClient.strength    = client.pDat.getInt(PA_Strength,  xConf.defaultStrength);
         ATBClient.playTime   += client.pDat.getInt(PA_PlayTime,  0);
-
-        lastDisconnectID = "";
         
-        if(ATBClient.configIndex != -1) {
+        // Reset disconnect time
+        client.pDat.set(PA_DisconnectTime, 0);
+
+        // Team strengths haven't changed since disconnect, put player back in his original team
+        if(disconnectTime >= lastStrengthChangeTime) {
           ATBClient.bInitialized = true;
           ATBClient.bMidGameJoin = true;
-          assignTeam(ATBClient, lastDisconnectTeam);
-          teamStrength[lastDisconnectTeam] += ATBClient.strength;
+          team = client.pDat.getInt(PA_Team,  0);
+          assignTeam(ATBClient, team);
+          teamStrength[team] += ATBClient.strength;
+          lastStrengthChangeTime = Level.TimeSeconds;
           return;
-        }
-      }
+        } else ATBClient.initialized();
+      } else ATBClient.locateDataEntry();
       
       // Player not yet initialized. Disallow play.
       if(control.gInf.gameState == control.gInf.GS_Playing) {
-        Level.Game.DiscardInventory(client.player);	
+        Level.Game.DiscardInventory(client.player); 
         client.player.PlayerRestartState = 'PlayerWaiting';
         client.player.GotoState(client.player.PlayerRestartState);
       }
@@ -174,8 +163,6 @@ function playerJoined(NexgenClient client) {
          control.gInf.gameState == control.gInf.GS_Starting) {
         ATBClient.bMidGameJoin = true;
       }
-      
-      ATBClient.locateDataEntry();
     }
   }
 }
@@ -197,47 +184,19 @@ function playerLeft(NexgenClient client) {
     removeATBClient(ATBClient);
     
     if(ATBClient.bTeamAssigned) {
-      teamStrength[client.player.playerReplicationInfo.team] -= ATBClient.strength;
-      lastDisconnectTime = Level.TimeSeconds;
-      lastDisconnectID   = client.playerID;
-      lastDisconnectTeam = client.player.playerReplicationInfo.team;
-      client.pDat.set(PA_ConfIndex,  ATBClient.configIndex);
-      client.pDat.set(PA_Strength,   ATBClient.strength);
-      client.pDat.set(PA_PlayTime,   ATBClient.playTime+client.timeSeconds);
+      teamStrength[client.team] -= ATBClient.strength;
+      client.pDat.set(PA_DisconnectTime, Level.TimeSeconds);
+      client.pDat.set(PA_Team,           client.team);
+      client.pDat.set(PA_ConfIndex,      ATBClient.configIndex);
+      client.pDat.set(PA_Strength,       ATBClient.strength);
+      client.pDat.set(PA_PlayTime,       ATBClient.playTime+client.timeSeconds);
+      lastDisconnectTime     = Level.TimeSeconds;
+      lastStrengthChangeTime = Level.TimeSeconds;
     }
     
     ATBClient.destroy();
     numCurrPlayers--;
   }
-}
-
-/***************************************************************************************************
- *
- *  $DESCRIPTION  Removes the specified client from the client list.
- *  $PARAM        client  The client that is to be removed.
- *  $REQUIRE      client != none
- *
- **************************************************************************************************/
-function removeATBClient(NexgenATBClient ATBClient) {
-	local NexgenATBClient currClient;
-	local bool bDone;
-	
-	// Remove the client from the linked client list.
-	if (ATBClientList == ATBClient) {
-		// First element in the list.
-		ATBClientList = ATBClient.nextATBClient;
-	} else {
-		// Somewhere else in the list.
-		currClient = ATBClientList;
-		while (!bDone && currClient != none) {
-			if (currClient.nextATBClient == ATBClient) {
-				bDone = true;
-				currClient.nextATBClient = ATBClient.nextATBClient;
-			} else {
-				currClient = currClient.nextATBClient;
-			}
-		}
-	}
 }
 
 /***************************************************************************************************
@@ -269,7 +228,7 @@ function playerRespawned(NexgenClient client) {
   ATBClient = getATBClient(client);
   
   if(ATBClient != none && ATBClient.bMidGameJoin && !ATBClient.bTeamAssigned) {  
-    Level.Game.DiscardInventory(client.player);	
+    Level.Game.DiscardInventory(client.player); 
     client.player.PlayerRestartState = 'PlayerWaiting';
     client.player.GotoState(client.player.PlayerRestartState);
   }
@@ -284,7 +243,7 @@ function playerRespawned(NexgenClient client) {
  *
  **************************************************************************************************/
 function playerTeamChanged(NexgenClient client) {
-	local NexgenATBClient ATBClient;
+  local NexgenATBClient ATBClient;
   
   ATBClient = getATBClient(client);
   
@@ -295,7 +254,7 @@ function playerTeamChanged(NexgenClient client) {
       // Manual team change, adjust team strength
       teamStrength[client.team]             += ATBClient.strength;
       teamStrength[int(!bool(client.team))] -= ATBClient.strength;
-      lastDisconnectID = "";
+      lastStrengthChangeTime = Level.TimeSeconds;
     }
   }
 }
@@ -424,6 +383,12 @@ function tick(float deltaTime) {
   // Playing state: mid-game joined players
   if(control.gInf != none && control.gInf.gameState == control.gInf.GS_Playing) { 
     for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
+      // Debug accessed nones
+      if(ATBClient.client == none) {
+        log("[NATB]: THIS SHOULD NEVER HAPPEN!");
+        removeATBClient(ATBClient);
+        continue;
+      }
       if(!ATBClient.client.bSpectator && ATBClient.client.player.PlayerRestartState == 'PlayerWaiting') {
         if(!ATBClient.bTeamAssigned) {
           FlashMessageToPlayer(ATBClient.client, "You are not yet assigned to a team.", colorOrange);
@@ -449,6 +414,16 @@ function tick(float deltaTime) {
     }
     if(midGameJoinTeamSortingTime != 0.0 && (Level.TimeSeconds - midGameJoinTeamSortingTime) > gameStartDelay) {
       midGameJoinTeamSortingTime = 0.0;
+    }
+    
+    // Check for team score changes
+    if(xConf.flagStrength != 0) {
+      if(teamScore[0] != TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[0].Score ||
+         teamScore[1] != TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[1].Score) {
+        teamScore[0] = TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[0].Score;
+        teamScore[1] = TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[1].Score;
+        lastStrengthChangeTime = Level.TimeSeconds;
+      }
     }
   }
 }
@@ -494,7 +469,7 @@ function virtualTimer() {
       // No waiting clients
       if(ATBClient == none) {
         // Wait for reconnect?
-        if(lastDisconnectID == "" || (Level.TimeSeconds - lastDisconnectTime) > maxReconnectWaitTime) {
+        if( (Level.TimeSeconds - lastDisconnectTime) > maxReconnectWaitTime) {
           // No, rebalance now!
           midGameRebalanceTeamSize();
         }
@@ -722,7 +697,7 @@ function midGameJoinTeamSorting(int midGameJoinToSort) {
   
   // Reset
   longestMidGameJoinWaitTime = 0;
-  lastDisconnectID = "";
+  lastStrengthChangeTime = Level.TimeSeconds;
   
   // Save time
   midGameJoinTeamSortingTime = Level.TimeSeconds;
@@ -801,7 +776,59 @@ function midGameRebalanceTeamSize() {
   control.broadcastMsg("<C04>Red team strength is "$getTeamStrengthWithFlagStrength(0)$", Blue team strength is "$getTeamStrengthWithFlagStrength(1)$".");
   
   // Reset
-  lastDisconnectID = "";
+  lastStrengthChangeTime = Level.TimeSeconds;
+}
+
+/***************************************************************************************************
+ *
+ *  $DESCRIPTION  Locates the NexgenATBClient instance for the given actor.
+ *  $PARAM        a  The actor for which the extended client handler instance is to be found.
+ *  $REQUIRE      a != none
+ *  $RETURN       The client handler for the given actor.
+ *  $ENSURE       (!a.isA('PlayerPawn') ? result == none : true) &&
+ *                imply(result != none, result.client.owner == a)
+ *
+ **************************************************************************************************/
+function NexgenATBClient getATBClient(NexgenClient client) {
+  local NexgenATBClient ATBClient;
+  
+  if (client != none && !client.bSpectator) {
+    for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
+      if(ATBClient.client == client) {
+        return ATBClient;
+      }
+    }
+  }
+  return none;
+}
+
+/***************************************************************************************************
+ *
+ *  $DESCRIPTION  Removes the specified client from the client list.
+ *  $PARAM        client  The client that is to be removed.
+ *  $REQUIRE      client != none
+ *
+ **************************************************************************************************/
+function removeATBClient(NexgenATBClient ATBClient) {
+  local NexgenATBClient currClient;
+  local bool bDone;
+  
+  // Remove the client from the linked client list.
+  if (ATBClientList == ATBClient) {
+    // First element in the list.
+    ATBClientList = ATBClient.nextATBClient;
+  } else {
+    // Somewhere else in the list.
+    currClient = ATBClientList;
+    while (!bDone && currClient != none) {
+      if (currClient.nextATBClient == ATBClient) {
+        bDone = true;
+        currClient.nextATBClient = ATBClient.nextATBClient;
+      } else {
+        currClient = currClient.nextATBClient;
+      }
+    }
+  }
 }
 
 /***************************************************************************************************
@@ -893,12 +920,12 @@ function int getTeamStrengthWithFlagStrength(byte teamNum) {
 function getTeamSizes(out int teamSizes[2], optional bool bExcludeWaitingPlayers) {
   local NexgenATBClient ATBClient;
 
-	// Get current team sizes.
+  // Get current team sizes.
   for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
-		if (!ATBClient.client.bSpectator && (!bExcludeWaitingPlayers || ATBClient.bTeamAssigned) && 0 <= ATBClient.client.player.playerReplicationInfo.team && ATBClient.client.player.playerReplicationInfo.team < 2) {
-			teamSizes[ATBClient.client.player.playerReplicationInfo.team]++;
-		}
-	}
+    if (!ATBClient.client.bSpectator && (!bExcludeWaitingPlayers || ATBClient.bTeamAssigned) && 0 <= ATBClient.client.player.playerReplicationInfo.team && ATBClient.client.player.playerReplicationInfo.team < 2) {
+      teamSizes[ATBClient.client.player.playerReplicationInfo.team]++;
+    }
+  }
 }
 
 /***************************************************************************************************
@@ -912,8 +939,8 @@ function getTeamSizes(out int teamSizes[2], optional bool bExcludeWaitingPlayers
  *
  **************************************************************************************************/
 function bool handleOurMsgCommands(PlayerPawn sender, string msg) {
-	local string cmd;
-	local bool bIsCommand;
+  local string cmd;
+  local bool bIsCommand;
   local int teamStrenthToShow;
   local NexgenClient client;
   
@@ -921,11 +948,11 @@ function bool handleOurMsgCommands(PlayerPawn sender, string msg) {
   
   if(client == none) return false;
 
-	cmd = class'NexgenUtil'.static.trim(msg);
-	bIsCommand = true;
+  cmd = class'NexgenUtil'.static.trim(msg);
+  bIsCommand = true;
   teamStrenthToShow = -1;
-	switch (cmd) {
-		case "!teams": case "!team": case "!t": case "!stats":
+  switch (cmd) {
+    case "!teams": case "!team": case "!t": case "!stats":
       if(initialTeamSortTime == 0) client.showMsg("<C00>Teams not yet assigned.");
       else { 
         client.showMsg("<C04>Red team strength is "$getTeamStrengthWithFlagStrength(0)$", Blue team strength is "$getTeamStrengthWithFlagStrength(1)$" (difference -"$int(abs(getTeamStrengthWithFlagStrength(0)-getTeamStrengthWithFlagStrength(1)))$").");
@@ -939,8 +966,8 @@ function bool handleOurMsgCommands(PlayerPawn sender, string msg) {
     case "!strength blue": case "!strength 1": teamStrenthToShow = 1; break;
 
     // Not a command.
-		default: bIsCommand = false;
-	}
+    default: bIsCommand = false;
+  }
   
   // Display detailed strength info via Nexgen's PM function (proper formatting and accessible as server side only plugin)
   if(teamStrenthToShow != -1) {
@@ -948,7 +975,7 @@ function bool handleOurMsgCommands(PlayerPawn sender, string msg) {
     if(!bWindowedStrengthMsgs) client.showPanel(class'NexgenRCPPrivateMsg'.default.panelIdentifier);
   }
 
-	return bIsCommand;  
+  return bIsCommand;  
 }
    
 /***************************************************************************************************
@@ -990,7 +1017,6 @@ function string getStrengthsString(byte team) {
  *  $DESCRIPTION  Default properties block.
  *
  **************************************************************************************************/
-
 defaultproperties
 {
      colorWhite=(R=255,G=255,B=255,A=32)
