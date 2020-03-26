@@ -9,12 +9,17 @@ var NexgenATBClient nextATBClient;
 // Data
 var int configIndex;
 var int strength;
+var int secondsPlayed;
 
 // Miscellaneous 
 var bool  bTeamAssigned;       
 var bool  bMidGameJoin;
-var bool  bTeamSwitched;
+var bool  bTeamSwitched; 
+var float beginPlayTime;
 var float playTime;
+
+// Used for updating the strength
+var float playerScore;
  
 // Control variables
 var bool bSortedByStrength;
@@ -47,21 +52,20 @@ event tick(float deltaTime) {
   if(locatingEntry) {
     for(i=lastChecked; i<maxEntriesPerTick && i < ArrayCount(xConf.playerData); i++) {
       if(xConf.playerData[i] == "") {
-        // New Entry
+        // New Entry, write initial data to config entry (mark as used)
         configIndex = i;
-        strength = xConf.defaultStrength;
-        initialized();
-        
-        // Write initial data to config entry
         xConf.playerData[i] = client.playerID;
         
+        // Load default values
+        xConf.loadData(configIndex, strength, secondsPlayed);
+        
+        initialized();
         return;
       } else {
-        class'NexgenUtil'.static.split(xConf.playerData[i], ID, remaining);
-        if(ID == client.playerID) {
+        // Found entry, load in data
+        if(Left(xConf.playerData[i], 32) == client.playerID) {
           configIndex = i;
-          class'NexgenUtil'.static.split(remaining, strengthStr, remaining);
-          strength = int(strengthStr);
+          xConf.loadData(configIndex, strength, secondsPlayed);
           initialized();
           return;
         }
@@ -69,9 +73,11 @@ event tick(float deltaTime) {
     }
   }
   
+  // Database full, overwrite last entry
   if(i == ArrayCount(xConf.playerData)) {
     configIndex = ArrayCount(xConf.playerData)-1;
-    strength = xConf.defaultStrength;
+    xConf.playerData[i] = Left(xConf.playerData[i], 32);
+    xConf.loadData(configIndex, strength, secondsPlayed);
     initialized();
   }
 }
