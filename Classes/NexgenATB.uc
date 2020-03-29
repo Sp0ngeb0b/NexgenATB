@@ -1035,7 +1035,7 @@ function updateStats() {
   local int winningTeam;
   local float accScore, accStrength;
   local float discPlayerScore;
-  local int discPlayerStrength, discPlayerSecondsPlayed;  
+  local int discPlayerStrength, discPlayerSecondsPlayed, discPlayerConfigIndex;  
   local int playerAmount;
   local float normalisedScore;
   local float oldTotalTimePlayed, oldTotalTimePlayedCopy, newTotalTimePlayed;
@@ -1148,16 +1148,19 @@ function updateStats() {
       normalisedScore = discPlayerScore * (accStrength * relNormalisationProp + normalisedStrength * (1.0 - relNormalisationProp)) / accScore;
 
       // Update time and strength
-      xConf.loadData(pDat.getInt(PA_ConfIndex, -1), oldStrength, discPlayerSecondsPlayed);
-      oldTotalTimePlayed     = discPlayerSecondsPlayed; 
-      oldTotalTimePlayedCopy = discPlayerSecondsPlayed;
-      playTime = pDat.getFloat(PA_PlayTime, 0.0);
-      if(oldTotalTimePlayed > hoursBeforeRecyStrength*3600) {
-        oldTotalTimePlayed = hoursBeforeRecyStrength;
+      discPlayerConfigIndex = pDat.getInt(PA_ConfIndex, -1);
+      if(discPlayerConfigIndex > -1) {
+        xConf.loadData(discPlayerConfigIndex, oldStrength, discPlayerSecondsPlayed);
+        oldTotalTimePlayed     = discPlayerSecondsPlayed; 
+        oldTotalTimePlayedCopy = discPlayerSecondsPlayed;
+        playTime = pDat.getFloat(PA_PlayTime, 0.0);
+        if(oldTotalTimePlayed > hoursBeforeRecyStrength*3600) {
+          oldTotalTimePlayed = hoursBeforeRecyStrength;
+        }
+        newTotalTimePlayed = oldTotalTimePlayed + playTime;
+        newStrength = (oldStrength*oldTotalTimePlayed + normalisedScore*playTime) / newTotalTimePlayed;
+        xConf.updateData(discPlayerConfigIndex, newStrength, oldTotalTimePlayedCopy + playTime);
       }
-      newTotalTimePlayed = oldTotalTimePlayed + playTime;
-      newStrength = (oldStrength*oldTotalTimePlayed + normalisedScore*playTime) / newTotalTimePlayed;
-      xConf.updateData(ATBClient.configIndex, newStrength, oldTotalTimePlayedCopy + playTime);
     }
   }  
 
@@ -1180,5 +1183,5 @@ defaultproperties
      TeamColor(3)=(R=255,G=255,B=0,A=32)
      pluginName="Nexgen Auto Team Balancer"
      pluginAuthor="Sp0ngeb0b"
-     pluginVersion="0.11"
+     pluginVersion="0.12"
 }
