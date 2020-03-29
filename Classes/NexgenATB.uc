@@ -33,7 +33,7 @@ const PA_Score                 = "natb_score";
 const PA_EndScore              = "natb_endScore";
 
 // Constants
-const minSinglePlayerWaitTime  = 8.0;          // Min amount of seconds a single player in the server has to wait before the game starts
+const minSinglePlayerWaitTime  = 10.0;         // Min amount of seconds a single player in the server has to wait before the game starts
 const maxInitWaitTime          = 5.0;          // Max amount of seconds the initial sorting can be delayed when waiting for a client to init
 const gameStartDelay           = 2.5;          // Amount of seconds to wait after a team is assigned before proceeding
 const minMidGameJoinWaitTime   = 3.0;          // Min amount of seconds a mid-game joined player waits for team assignment (starting at ATBClient initialization) 
@@ -100,16 +100,16 @@ function bool initialize() {
 
 /***************************************************************************************************
  *
- *  $DESCRIPTION  Called when a new client has been created. Use this function to setup the new
- *                client with your own extensions (in order to support the plugin).
- *  $PARAM        client  The client that was just created.
+ *  $DESCRIPTION  Called whenever a player has joined the game (after its login has been accepted).
+ *  $PARAM        client  The player that has joined the game.
  *  $REQUIRE      client != none
  *  $OVERRIDE
  *
  **************************************************************************************************/
-function clientCreated(NexgenClient client) {
+function playerJoined(NexgenClient client) {
   local NexgenATBClient ATBClient;
-  local int i;
+  local float disconnectTime;
+  local int team;
   
   if(client.bSpectator) return;
   
@@ -122,60 +122,38 @@ function clientCreated(NexgenClient client) {
   ATBClient.nextATBClient = ATBClientList;
   ATBClientList = ATBClient;
   numCurrPlayers++;
-}
 
-/***************************************************************************************************
- *
- *  $DESCRIPTION  Called whenever a player has joined the game (after its login has been accepted).
- *  $PARAM        client  The player that has joined the game.
- *  $REQUIRE      client != none
- *  $OVERRIDE
- *
- **************************************************************************************************/
-function playerJoined(NexgenClient client) {
-  local NexgenATBClient ATBClient;
-  local float disconnectTime;
-  local int team;
-
-  if(control.gInf != none) {
-    ATBClient = getATBClient(client);
+  // Reconnect?
+  disconnectTime = client.pDat.getFloat(PA_DisconnectTime, 0.0);
+  if(disconnectTime > 0) {
+    ATBClient.configIndex = client.pDat.getInt(PA_ConfIndex, -1);
+    xConf.loadData(ATBClient.configIndex, ATBClient.strength, ATBClient.secondsPlayed);
     
-    if(ATBClient != none) {
-      disconnectTime = client.pDat.getFloat(PA_DisconnectTime, 0.0);
-    
-      // Reconnect?
-      if(disconnectTime > 0) {
-        ATBClient.configIndex = client.pDat.getInt(PA_ConfIndex, -1);
-        xConf.loadData(ATBClient.configIndex, ATBClient.strength, ATBClient.secondsPlayed);
-        
-        // Reset disconnect time
-        client.pDat.set(PA_DisconnectTime, 0.0);
+    // Reset disconnect time
+    client.pDat.set(PA_DisconnectTime, 0.0);
 
-        // Team strengths haven't changed since disconnect, put player back in his original team
-        if(disconnectTime >= lastStrengthChangeTime) {
-          ATBClient.bInitialized  = true;
-          ATBClient.bMidGameJoin  = true;
-          ATBClient.beginPlayTime = control.timeSeconds;
-          team = client.pDat.getInt(PA_Team,  0);
-          assignTeam(ATBClient, team);
-          teamStrength[team] += ATBClient.strength;
-          lastStrengthChangeTime = control.timeSeconds;
-          return;
-        } else ATBClient.initialized();
-      } else ATBClient.locateDataEntry();
-      
-      // Player not yet initialized. Disallow play.
-      if(control.gInf.gameState == control.gInf.GS_Playing) {
-        Level.Game.DiscardInventory(client.player); 
-        client.player.PlayerRestartState = 'PlayerWaiting';
-        client.player.GotoState(client.player.PlayerRestartState);
-      }
-      if(control.gInf.gameState == control.gInf.GS_Playing ||
-        (control.gInf.gameState == control.gInf.GS_Waiting && initialTeamSortTime != 0.0) ||
-         control.gInf.gameState == control.gInf.GS_Starting) {
-        ATBClient.bMidGameJoin = true;
-      }
-    }
+    // Team strengths haven't changed since disconnect, put player back in his original team
+    if(disconnectTime >= lastStrengthChangeTime) {
+      ATBClient.bInitialized  = true;
+      ATBClient.bMidGameJoin  = true;
+      ATBClient.beginPlayTime = control.timeSeconds;
+      team = client.pDat.getInt(PA_Team,  0);
+      assignTeam(ATBClient, team);
+      lastStrengthChangeTime = control.timeSeconds;
+      return;
+    } else ATBClient.initialized();
+  } else ATBClient.locateDataEntry();
+  
+  // Player not yet initialized. Disallow play.
+  if(control.gInf.gameState == control.gInf.GS_Playing) {
+    Level.Game.DiscardInventory(client.player); 
+    client.player.PlayerRestartState = 'PlayerWaiting';
+    client.player.GotoState(client.player.PlayerRestartState);
+  }
+  if(control.gInf.gameState == control.gInf.GS_Playing ||
+    (control.gInf.gameState == control.gInf.GS_Waiting && initialTeamSortTime != 0.0) ||
+     control.gInf.gameState == control.gInf.GS_Starting) {
+    ATBClient.bMidGameJoin = true;
   }
 }
 
@@ -338,6 +316,13 @@ function tick(float deltaTime) {
           // Sort the teams.
           initialTeamSorting(numPlayersInitialized);
           initialTeamSortTime = control.timeSeconds;
+          
+          // Mark latecomers.
+          if(numCurrPlayers-numPlayersInitialized > 0) {
+            for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
+              if(!ATBClient.bInitialized) ATBClient.bMidGameJoin = true;
+            }
+          }
         }
       } 
     } else {
@@ -529,7 +514,7 @@ function sortNewClientsByStrength(int amount, out NexgenATBClient sortedATBClien
     max = -1;
     
     for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
-      if(!ATBClient.bInitialized || ATBClient.bSortedByStrength) continue;
+      if(ATBClient.bSortedByStrength || !ATBClient.bInitialized || ATBClient.bTeamAssigned) continue;
       
       if(ATBClient.strength > max) {
         maxATBClient = ATBClient;
@@ -566,7 +551,7 @@ function sortTeamClientsByStrength(int amount, byte team, out NexgenATBClient so
     max = -1;
     
     for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
-      if(ATBClient.bSortedByStrength || ATBClient.client.player.playerReplicationInfo.team != team) continue;
+      if(ATBClient.bSortedByStrength || !ATBClient.bInitialized || ATBClient.client.player.playerReplicationInfo.team != team) continue;
       
       if(ATBClient.strength > max) {
         maxATBClient = ATBClient;
@@ -636,7 +621,6 @@ function initialTeamSorting(int numPlayersInitialized) {
    
     // Move player and update team strength
     assignTeam(sortedATBClients[i], actualCurrTeam);
-    teamStrength[actualCurrTeam] += sortedATBClients[i].strength;
     
     // Work out next team
     currTeam = currTeam + direction;
@@ -654,7 +638,6 @@ function initialTeamSorting(int numPlayersInitialized) {
     if(getTeamStrengthWithFlagStrength(0) > getTeamStrengthWithFlagStrength(1)) weakerTeam = 1;  
     
     assignTeam(sortedATBClients[numPlayersInitialized-1], weakerTeam);
-    teamStrength[weakerTeam] += sortedATBClients[numPlayersInitialized-1].strength;
   }
   
   // Announce team
@@ -700,13 +683,11 @@ function midGameJoinTeamSorting(int midGameJoinToSort) {
     // The weakest team already has the number advantage
     // Put the weakest player into the stronger team
     assignTeam(sortedATBClients[midGameJoinToSort-1], strongerTeam);
-    teamStrength[strongerTeam] += sortedATBClients[midGameJoinToSort-1].strength;
     end = midGameJoinToSort-1;
   } else if(teamSizes[weakerTeam] < teamSizes[strongerTeam]) {
     // The weakest team has the number disadvantage
     // Put the strongest player into the weaker team
     assignTeam(sortedATBClients[0], weakerTeam);
-    teamStrength[weakerTeam] += sortedATBClients[0].strength;
     start = 1;
   } 
 
@@ -715,7 +696,6 @@ function midGameJoinTeamSorting(int midGameJoinToSort) {
   for(i=start; i<end; i++) {
     // Move player and update team strength
     assignTeam(sortedATBClients[i], weakerTeam);
-    teamStrength[weakerTeam] += sortedATBClients[i].strength;
 
     weakerTeam = strongerTeam;
   }  
@@ -767,7 +747,6 @@ function midGameRebalanceTeamSize() {
       
       assignTeam(sortedATBClientsLargerTeam[nextPlayerToMove], smallerTeam);
       teamStrength[largerTeam]  -= sortedATBClientsLargerTeam[nextPlayerToMove].strength;
-      teamStrength[smallerTeam] += sortedATBClientsLargerTeam[nextPlayerToMove].strength;
       
       // Inform player
       for(i=0; i<7; i++)   sortedATBClientsLargerTeam[nextPlayerToMove].client.player.SetProgressMessage("", i);
@@ -790,7 +769,6 @@ function midGameRebalanceTeamSize() {
      
       assignTeam(preferedATBClient, smallerTeam);
       teamStrength[largerTeam]  -= preferedATBClient.strength;
-      teamStrength[smallerTeam] += preferedATBClient.strength;
       
       // Inform player 
       for(i=0; i<7; i++)   preferedATBClient.client.player.SetProgressMessage("", i);
@@ -928,6 +906,7 @@ function FlashMessageToPlayer(NexgenClient client, string Msg, Color msgColor, o
  **************************************************************************************************/
 function assignTeam(NexgenATBClient ATBClient, byte newTeam) {
   ATBClient.bTeamAssigned = true;
+  teamStrength[newTeam] += ATBClient.strength;
   if(newTeam != ATBClient.client.player.playerReplicationInfo.team) {
     ATBClient.client.setTeam(newTeam);
     ATBClient.bTeamSwitched = true;
@@ -1201,5 +1180,5 @@ defaultproperties
      TeamColor(3)=(R=255,G=255,B=0,A=32)
      pluginName="Nexgen Auto Team Balancer"
      pluginAuthor="Sp0ngeb0b"
-     pluginVersion="0.1"
+     pluginVersion="0.11"
 }
