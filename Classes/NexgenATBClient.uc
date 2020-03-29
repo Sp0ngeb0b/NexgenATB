@@ -82,10 +82,20 @@ event tick(float deltaTime) {
   }
 }
 
+/***************************************************************************************************
+ *
+ *  $DESCRIPTION  Initiates the database lookup.
+ *
+ **************************************************************************************************/
 function locateDataEntry() {
   locatingEntry = true;
 }
 
+/***************************************************************************************************
+ *
+ *  $DESCRIPTION  Called when a database entry was found or created.
+ *
+ **************************************************************************************************/
 function initialized() {
   bInitialized = true;
   locatingEntry = false;
