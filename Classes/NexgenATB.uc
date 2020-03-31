@@ -388,12 +388,6 @@ function tick(float deltaTime) {
   // Playing state: mid-game joined players
   if(control.gInf != none && control.gInf.gameState == control.gInf.GS_Playing) { 
     for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
-      // Debug accessed nones
-      if(ATBClient.client == none) {
-        log("[NATB]: THIS SHOULD NEVER HAPPEN!");
-        removeATBClient(ATBClient);
-        continue;
-      }
       if(!ATBClient.client.bSpectator && ATBClient.client.player.PlayerRestartState == 'PlayerWaiting') {
         if(!ATBClient.bTeamAssigned) {
           FlashMessageToPlayer(ATBClient.client, "You are not yet assigned to a team.", colorOrange);
@@ -690,6 +684,13 @@ function midGameJoinTeamSorting(int midGameJoinToSort) {
     assignTeam(sortedATBClients[0], weakerTeam);
     start = 1;
   } 
+  
+  // Update weaker/stronger team if required
+  if(start != 0 || end != midGameJoinToSort) {
+    weakerTeam   = 0;
+    if(getTeamStrengthWithFlagStrength(0) > getTeamStrengthWithFlagStrength(1)) weakerTeam = 1;  
+    strongerTeam = int(!bool(weakerTeam));
+  }
 
   // Build teams
   // Scheme: weak-strong-weak-strong-...
@@ -1183,5 +1184,5 @@ defaultproperties
      TeamColor(3)=(R=255,G=255,B=0,A=32)
      pluginName="Nexgen Auto Team Balancer"
      pluginAuthor="Sp0ngeb0b"
-     pluginVersion="0.12"
+     pluginVersion="0.13"
 }
