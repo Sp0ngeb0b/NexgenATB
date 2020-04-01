@@ -26,7 +26,7 @@ var bool bSortedByStrength;
 var int strengthRating;
 var bool bInitialized;
 var bool locatingEntry;
-var int lastChecked;
+var int nextToCheck;
 
 const maxEntriesPerTick = 64;
 
@@ -50,7 +50,7 @@ event tick(float deltaTime) {
   local string ID, strengthStr, remaining;
   
   if(locatingEntry) {
-    for(i=lastChecked; i<maxEntriesPerTick && i < ArrayCount(xConf.playerData); i++) {
+    for(i=nextToCheck; i<nextToCheck+maxEntriesPerTick && i < ArrayCount(xConf.playerData); i++) {
       if(xConf.playerData[i] == "") {
         // New Entry, write initial data to config entry (mark as used)
         configIndex = i;
@@ -72,6 +72,8 @@ event tick(float deltaTime) {
       }
     }
   }
+  
+  nextToCheck = i;
   
   // Database full, overwrite last entry
   if(i == ArrayCount(xConf.playerData)) {
