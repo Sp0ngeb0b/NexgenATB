@@ -126,7 +126,9 @@ function playerJoined(NexgenClient client) {
   // Reconnect?
   disconnectTime = client.pDat.getFloat(PA_DisconnectTime, 0.0);
   if(disconnectTime > 0) {
+    // Restore saved data
     ATBClient.configIndex = client.pDat.getInt(PA_ConfIndex, -1);
+    ATBClient.playTime    = client.pDat.getFloat(PA_PlayTime, 0.0);
     xConf.loadData(ATBClient.configIndex, ATBClient.strength, ATBClient.secondsPlayed);
     
     // Reset disconnect time
@@ -174,7 +176,7 @@ function playerLeft(NexgenClient client) {
     removeATBClient(ATBClient);
     
     if(ATBClient.bTeamAssigned) {
-      // Restore saved info
+      // Save info for later
       teamStrength[client.team] -= ATBClient.strength;
       client.pDat.set(PA_DisconnectTime, control.timeSeconds);
       client.pDat.set(PA_Team,           client.team);
@@ -184,7 +186,10 @@ function playerLeft(NexgenClient client) {
       // Update client's play time
       if(ATBClient.beginPlayTime > 0.0) {
         client.pDat.set(PA_PlayTime,     ATBClient.playTime + (control.timeSeconds-ATBClient.beginPlayTime));
+      } else {
+        client.pDat.set(PA_PlayTime,     ATBClient.playTime);
       }
+      
       lastDisconnectTime     = control.timeSeconds;
       lastStrengthChangeTime = control.timeSeconds;
     }
@@ -1184,5 +1189,5 @@ defaultproperties
      TeamColor(3)=(R=255,G=255,B=0,A=32)
      pluginName="Nexgen Auto Team Balancer"
      pluginAuthor="Sp0ngeb0b"
-     pluginVersion="0.13"
+     pluginVersion="0.14"
 }
