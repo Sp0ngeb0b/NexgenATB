@@ -1054,7 +1054,7 @@ function updateStats() {
   // Gather some data
   if     (TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[1].Score ==
           TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[0].Score) winningTeam = -1;
-  else if(TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[1].Score ==
+  else if(TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[1].Score >
           TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[0].Score) winningTeam = 1;
 
   // Accumulate average score and strength for online players
@@ -1127,7 +1127,7 @@ function updateStats() {
       playTime = ATBClient.playTime + (control.gameEndTime-ATBClient.beginPlayTime);
       oldTotalTimePlayed = ATBClient.secondsPlayed;
       if(oldTotalTimePlayed > hoursBeforeRecyStrength*3600) {
-        oldTotalTimePlayed = hoursBeforeRecyStrength;
+        oldTotalTimePlayed = hoursBeforeRecyStrength*3600;
       }
       newTotalTimePlayed = oldTotalTimePlayed + playTime;
       oldStrength = ATBClient.strength;
@@ -1161,7 +1161,7 @@ function updateStats() {
         oldTotalTimePlayedCopy = discPlayerSecondsPlayed;
         playTime = pDat.getFloat(PA_PlayTime, 0.0);
         if(oldTotalTimePlayed > hoursBeforeRecyStrength*3600) {
-          oldTotalTimePlayed = hoursBeforeRecyStrength;
+          oldTotalTimePlayed = hoursBeforeRecyStrength*3600;
         }
         newTotalTimePlayed = oldTotalTimePlayed + playTime;
         newStrength = (oldStrength*oldTotalTimePlayed + normalisedScore*playTime) / newTotalTimePlayed;
@@ -1189,5 +1189,5 @@ defaultproperties
      TeamColor(3)=(R=255,G=255,B=0,A=32)
      pluginName="Nexgen Auto Team Balancer"
      pluginAuthor="Sp0ngeb0b"
-     pluginVersion="0.15"
+     pluginVersion="0.16"
 }
