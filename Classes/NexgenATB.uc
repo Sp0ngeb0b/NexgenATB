@@ -6,8 +6,8 @@ var NexgenATBClient ATBClientList;             // First client of our own client
 var NexgenATBClient ATBDisconnectedtList;      // First client of our own disconnected client list.
 
 // Team specific vars
-var int teamStrength[2];                       // Current accumulated strength of the teams (without flag strength) 
-var float  teamScore[2];                       // Last known team score, used to detect changes of accumulated flag strength.
+var float teamStrength[2];                     // Current accumulated strength of the teams (without flag strength) 
+var float teamScore[2];                        // Last known team score, used to detect changes of accumulated flag strength.
 
 // Time vars
 var float waitFinishTime;                      // Time at which the initial waiting timer at gamestart ran out 
@@ -574,9 +574,9 @@ function sortTeamClientsByStrength(int amount, byte team, out NexgenATBClient so
  *                A low rating is desired.
  *
  **************************************************************************************************/
-function NexgenATBClient getBestSwitch(byte team, int difference) {
+function NexgenATBClient getBestSwitch(byte team, float difference) {
   local NexgenATBClient ATBClient, minATBClient; 
-  local int newDifference;
+  local float newDifference;
   local float playTime;
 
   // Compute strength rating and find min
@@ -647,7 +647,7 @@ function initialTeamSorting(int numPlayersInitialized) {
   
   // Announce strengths
   control.broadcastMsg("<C04>Nexgen Auto Team Balancer is assigning teams...");
-  control.broadcastMsg("<C04>Red team strength is "$teamStrength[0]$", Blue team strength is "$teamStrength[1]$".");
+  control.broadcastMsg("<C04>Red team strength is "$int(teamStrength[0])$", Blue team strength is "$int(teamStrength[1])$".");
 }
 
 /***************************************************************************************************
@@ -728,7 +728,8 @@ function midGameRebalanceTeamSize() {
   local NexgenATBClient sortedATBClientsLargerTeam[32];
   local NexgenATBClient preferedATBClient;
   local int teamSizes[2];
-  local int largerTeam, smallerTeam, sizeDifference, strengthDifference;
+  local int largerTeam, smallerTeam, sizeDifference; 
+  local float strengthDifference;
   local int nextPlayerToMove;
   local int movedPlayerAmount;
   local int i;
@@ -976,7 +977,7 @@ function assignTeam(NexgenATBClient ATBClient, byte newTeam) {
  *  $DESCRIPTION  Team strengths including flag bonus
  *
  **************************************************************************************************/
-function int getTeamStrengthWithFlagStrength(byte teamNum) {
+function float getTeamStrengthWithFlagStrength(byte teamNum) {
   return teamStrength[teamNum] + TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[teamNum].Score * xConf.flagStrength;
 }
 
@@ -1009,7 +1010,7 @@ function getTeamSizes(out int teamSizes[2], optional bool bExcludeWaitingPlayers
 function bool handleOurMsgCommands(PlayerPawn sender, string msg) {
   local string cmd;
   local bool bIsCommand;
-  local int teamStrenthToShow;
+  local int teamStrengthToShow;
   local NexgenClient client;
   
   client = control.getClient(sender);
@@ -1018,28 +1019,28 @@ function bool handleOurMsgCommands(PlayerPawn sender, string msg) {
 
   cmd = class'NexgenUtil'.static.trim(msg);
   bIsCommand = true;
-  teamStrenthToShow = -1;
+  teamStrengthToShow = -1;
   switch (cmd) {
     case "!teams": case "!team": case "!t": case "!stats":
       if(initialTeamSortTime == 0) client.showMsg("<C00>Teams not yet assigned.");
       else { 
-        client.showMsg("<C04>Red team strength is "$getTeamStrengthWithFlagStrength(0)$", Blue team strength is "$getTeamStrengthWithFlagStrength(1)$" (difference -"$int(abs(getTeamStrengthWithFlagStrength(0)-getTeamStrengthWithFlagStrength(1)))$").");
+        client.showMsg("<C04>Red team strength is "$int(getTeamStrengthWithFlagStrength(0))$", Blue team strength is "$int(getTeamStrengthWithFlagStrength(1))$" (difference -"$int(abs(getTeamStrengthWithFlagStrength(0)-getTeamStrengthWithFlagStrength(1)))$").");
         client.showMsg("<C04>Say '!strengths' for more details.");
       }
     break;
     
     // Detailed strength info requested?
     case "!strengths": client.showMsg("<C04>Usage: '!strengths <red/blue>'"); break;
-    case "!strengths red": case "!strengths 0":  teamStrenthToShow = 0; break;
-    case "!strengths blue": case "!strengths 1": teamStrenthToShow = 1; break;
+    case "!strengths red": case "!strengths 0":  teamStrengthToShow = 0; break;
+    case "!strengths blue": case "!strengths 1": teamStrengthToShow = 1; break;
 
     // Not a command.
     default: bIsCommand = false;
   }
   
   // Display detailed strength info via Nexgen's PM function (proper formatting and accessible as server side only plugin)
-  if(teamStrenthToShow != -1) {
-    NexgenClientCore(client.getController(class'NexgenClientCore'.default.ctrlID)).receivePM(client.playerID, client.player.playerReplicationInfo, getStrengthsString(teamStrenthToShow), bWindowedStrengthMsgs, true);
+  if(teamStrengthToShow != -1) {
+    NexgenClientCore(client.getController(class'NexgenClientCore'.default.ctrlID)).receivePM(client.playerID, client.player.playerReplicationInfo, getStrengthsString(teamStrengthToShow), bWindowedStrengthMsgs, true);
     if(!bWindowedStrengthMsgs) client.showPanel(class'NexgenRCPPrivateMsg'.default.panelIdentifier);
   }
 
@@ -1074,7 +1075,7 @@ function string getStrengthsString(byte team) {
   if(!bWindowedStrengthMsgs) res = res $newLineToken;
   for(i=0; i<teamSizes[team]; i++) {
     hrsPlayed = sortedATBClients[i].secondsPlayed/3600.0;
-    res = res$sortedATBClients[i].client.playerName$": "$sortedATBClients[i].strength$" ("$Left(hrsPlayed, InStr(hrsPlayed, ".")+3)$"hrs)";
+    res = res$sortedATBClients[i].client.playerName$": "$Left(sortedATBClients[i].strength, InStr(sortedATBClients[i].strength, ".")+3)$" ("$Left(hrsPlayed, InStr(hrsPlayed, ".")+3)$"hrs)";
     if(i != teamSizes[team]-1) res = res$seperatorToken;
   }
   
@@ -1105,6 +1106,7 @@ function updateStats() {
   // Accumulate score and strength for online players
   for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
     if(ATBClient.beginPlayTime > 0.0) ATBClient.playTime += (control.gameEndTime-ATBClient.beginPlayTime);
+    else log("[NATB] ATBClient.beginPlayTime is 0.0 for "$ATBClient.playerID);
     ATBClient.score = ATBClient.client.player.PlayerReplicationInfo.Score;
     accumScoreStrength(ATBClient, winningTeam, accScore, accStrength, playerAmount);
   }
@@ -1173,7 +1175,7 @@ function accumScoreStrength(NexgenATBClient ATBClient, int winningTeam, out floa
 function updatePlayerStrength(NexgenATBClient ATBClient, float avgScore, float avgStrength) {
   local float normalisedScore;
   local float oldTotalTimePlayed, newTotalTimePlayed;
-  local int oldStrength, newStrength, strengthDifference;
+  local float oldStrength, newStrength, strengthDifference;
 
   if(ATBClient.playerScore != 0.0) {
     // Other magic formular taken from ATB
@@ -1198,8 +1200,8 @@ function updatePlayerStrength(NexgenATBClient ATBClient, float avgScore, float a
     // Announce to player
     if(ATBClient.client != none) {
       strengthDifference = newStrength-oldStrength;
-      if     (strengthDifference > 0) ATBClient.client.showMsg("<C02>Strength increased by "$strengthDifference$"! New strength is "$newStrength$".");
-      else if(strengthDifference < 0) ATBClient.client.showMsg("<C00>Strength decreased by "$-strengthDifference$"! New strength is "$newStrength$".");
+      if     (strengthDifference > 0) ATBClient.client.showMsg("<C02>Strength increased by "$Left(strengthDifference, InStr(strengthDifference, ".")+3)$  "! New strength is "$Left(newStrength, InStr(newStrength, ".")+3)$".");
+      else if(strengthDifference < 0) ATBClient.client.showMsg("<C00>Strength decreased by "$Left(-strengthDifference, InStr(-strengthDifference, ".")+3)$"! New strength is "$Left(newStrength, InStr(newStrength, ".")+3)$".");
       else                            ATBClient.client.showMsg("<C02>Strength retained at "$newStrength$"!");
     }
   }
@@ -1220,5 +1222,5 @@ defaultproperties
      TeamColor(3)=(R=255,G=255,B=0,A=32)
      pluginName="Nexgen Auto Team Balancer"
      pluginAuthor="Sp0ngeb0b"
-     pluginVersion="0.20"
+     pluginVersion="0.21"
 }

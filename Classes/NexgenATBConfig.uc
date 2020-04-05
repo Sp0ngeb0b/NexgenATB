@@ -16,7 +16,7 @@ const separator = ",";
  *  $DESCRIPTION  Unloads the data stored in the database for a certain index.
  *
  **************************************************************************************************/
-function loadData(int index, out int strength, out int secondsPlayed) {
+function loadData(int index, out float strength, out int secondsPlayed) {
   local string remaining, strengthStr, secondsPlayedStr;
   
   // Default values
@@ -26,7 +26,7 @@ function loadData(int index, out int strength, out int secondsPlayed) {
   } else {
     class'NexgenUtil'.static.split(playerData[index], strengthStr, remaining);
     class'NexgenUtil'.static.split(remaining, strengthStr, remaining);
-    strength = int(strengthStr);
+    strength = float(strengthStr);
     class'NexgenUtil'.static.split(remaining, secondsPlayedStr, remaining);
     secondsPlayed = int(secondsPlayedStr);
   }
@@ -37,7 +37,7 @@ function loadData(int index, out int strength, out int secondsPlayed) {
  *  $DESCRIPTION  Updates a certain database entry.
  *
  **************************************************************************************************/
-function updateData(int index, int strength, int secondsPlayed) {
+function updateData(int index, float strength, int secondsPlayed) {
   playerData[index] = Left(playerData[index], 32) $ separator $ strength $ separator $ secondsPlayed $ separator $ getDate();
 }
 

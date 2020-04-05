@@ -11,7 +11,7 @@ var string playerID;
 
 // Persistent config data
 var int configIndex;
-var int strength;
+var float strength;
 var int secondsPlayed;
 
 // Persistent game data
@@ -31,7 +31,7 @@ var float playerScore;
  
 // Control variables
 var bool bSortedByStrength;
-var int strengthRating;
+var float strengthRating;
 var bool bInitialized;
 var bool locatingEntry;
 var int nextToCheck;
