@@ -3,6 +3,7 @@ class NexgenATB extends NexgenPlugin;
 // References
 var NexgenATBConfig xConf;                     // Plugin configuration.
 var NexgenATBClient ATBClientList;             // First client of our own client list.
+var NexgenATBClient ATBDisconnectedtList;      // First client of our own disconnected client list.
 
 // Team specific vars
 var int teamStrength[2];                       // Current accumulated strength of the teams (without flag strength) 
@@ -23,14 +24,6 @@ var bool endStatsUpdated;
 // Resources
 var Sound startSound, playSound, teamSound[2];
 var Color colorWhite, colorOrange, TeamColor[4];
-
-// Identifiers used for storing data of disconnected players
-const PA_ConfIndex             = "natb_configIndex";
-const PA_PlayTime              = "natb_playTime";
-const PA_Team                  = "natb_team";
-const PA_DisconnectTime        = "natb_disconnectTime";
-const PA_Score                 = "natb_score";
-const PA_EndScore              = "natb_endScore";
 
 // Constants
 const minSinglePlayerWaitTime  = 10.0;         // Min amount of seconds a single player in the server has to wait before the game starts
@@ -108,50 +101,54 @@ function bool initialize() {
  **************************************************************************************************/
 function playerJoined(NexgenClient client) {
   local NexgenATBClient ATBClient;
-  local float disconnectTime;
-  local int team;
   
   if(client.bSpectator) return;
   
-  ATBClient = spawn(class'NexgenATBClient', self);
-  ATBClient.client = client;
-  ATBClient.xControl = self;
-  ATBClient.xConf = xConf;
+  // Search for existing client
+  ATBClient = findATBDisconnectedClient(client);
   
-  // Add to list
-  ATBClient.nextATBClient = ATBClientList;
-  ATBClientList = ATBClient;
+  // Reconnect?
+  if(ATBClient != none) {
+    // Restore client reference
+    ATBClient.client = client;
+
+    // Put back to old team?
+    if(ATBClient.bTeamAssigned && ATBClient.disconnectedTime >= lastStrengthChangeTime) {
+      ATBClient.beginPlayTime = control.timeSeconds;
+      assignTeam(ATBClient, ATBClient.team);
+      lastStrengthChangeTime = control.timeSeconds;
+    } else {
+      ATBClient.bTeamAssigned = false;
+      ATBClient.initialized(); // Clients on the disconnected list are ensured to be initialized
+    }
+    
+    // Move to active list
+    removeATBDisconnectedClient(ATBClient);
+  } else {
+    // New client
+    ATBClient = spawn(class'NexgenATBClient', self);
+    ATBClient.playerID = client.playerID;
+    ATBClient.client = client;
+    ATBClient.xControl = self;
+    ATBClient.xConf = xConf;
+    
+    // Add to list
+    ATBClient.nextATBClient = ATBClientList;
+    ATBClientList = ATBClient;
+    
+    // Locate data entry
+    ATBClient.locateDataEntry();
+  }
   numCurrPlayers++;
 
-  // Reconnect?
-  disconnectTime = client.pDat.getFloat(PA_DisconnectTime, 0.0);
-  if(disconnectTime > 0) {
-    // Restore saved data
-    ATBClient.configIndex = client.pDat.getInt(PA_ConfIndex, -1);
-    ATBClient.playTime    = client.pDat.getFloat(PA_PlayTime, 0.0);
-    xConf.loadData(ATBClient.configIndex, ATBClient.strength, ATBClient.secondsPlayed);
-    
-    // Reset disconnect time
-    client.pDat.set(PA_DisconnectTime, 0.0);
-
-    // Team strengths haven't changed since disconnect, put player back in his original team
-    if(disconnectTime >= lastStrengthChangeTime) {
-      ATBClient.bInitialized  = true;
-      ATBClient.bMidGameJoin  = true;
-      ATBClient.beginPlayTime = control.timeSeconds;
-      team = client.pDat.getInt(PA_Team,  0);
-      assignTeam(ATBClient, team);
-      lastStrengthChangeTime = control.timeSeconds;
-      return;
-    } else ATBClient.initialized();
-  } else ATBClient.locateDataEntry();
-  
   // Player not yet initialized. Disallow play.
-  if(control.gInf.gameState == control.gInf.GS_Playing) {
+  if(control.gInf.gameState == control.gInf.GS_Playing && !ATBClient.bTeamAssigned) {
     Level.Game.DiscardInventory(client.player); 
     client.player.PlayerRestartState = 'PlayerWaiting';
     client.player.GotoState(client.player.PlayerRestartState);
   }
+  
+  // Mark mid-game joins
   if(control.gInf.gameState == control.gInf.GS_Playing ||
     (control.gInf.gameState == control.gInf.GS_Waiting && initialTeamSortTime != 0.0) ||
      control.gInf.gameState == control.gInf.GS_Starting) {
@@ -173,28 +170,29 @@ function playerLeft(NexgenClient client) {
   ATBClient = getATBClient(client);
   
   if(ATBClient != none) {
-    removeATBClient(ATBClient);
-    
-    if(ATBClient.bTeamAssigned) {
-      // Save info for later
-      teamStrength[client.team] -= ATBClient.strength;
-      client.pDat.set(PA_DisconnectTime, control.timeSeconds);
-      client.pDat.set(PA_Team,           client.team);
-      client.pDat.set(PA_ConfIndex,      ATBClient.configIndex);
-      client.pDat.set(PA_Score,          client.player.playerReplicationInfo.score);
-
-      // Update client's play time
-      if(ATBClient.beginPlayTime > 0.0) {
-        client.pDat.set(PA_PlayTime,     ATBClient.playTime + (control.timeSeconds-ATBClient.beginPlayTime));
-      } else {
-        client.pDat.set(PA_PlayTime,     ATBClient.playTime);
-      }
+    if(ATBClient.bInitialized) {
+      // Move to disconnected list
+      removeATBClient(ATBClient);
       
-      lastDisconnectTime     = control.timeSeconds;
-      lastStrengthChangeTime = control.timeSeconds;
+      if(ATBClient.bTeamAssigned) {
+        // Save info for later
+        teamStrength[client.team] -= ATBClient.strength;
+        ATBClient.team = client.team;
+        if(ATBClient.beginPlayTime > 0.0) {
+          ATBClient.playTime += control.timeSeconds-ATBClient.beginPlayTime;
+          ATBClient.score     = client.player.playerReplicationInfo.score;
+        }
+        ATBClient.disconnectedTime = level.timeSeconds;
+        ATBClient.beginPlayTime = 0.0;
+        
+        // Update global vars
+        lastDisconnectTime     = control.timeSeconds;
+        lastStrengthChangeTime = control.timeSeconds;
+      }
+    } else {
+      removeATBClient(ATBClient, true);
+      ATBClient.destroy();
     }
-    
-    ATBClient.destroy();
     numCurrPlayers--;
   }
 }
@@ -824,11 +822,11 @@ function NexgenATBClient getATBClient(NexgenClient client) {
  *  $REQUIRE      client != none
  *
  **************************************************************************************************/
-function removeATBClient(NexgenATBClient ATBClient) {
+function removeATBClient(NexgenATBClient ATBClient, optional bool bDontMove) {
   local NexgenATBClient currClient;
   local bool bDone;
   
-  // Remove the client from the linked client list.
+  // Remove the client from the linked online client list.
   if (ATBClientList == ATBClient) {
     // First element in the list.
     ATBClientList = ATBClient.nextATBClient;
@@ -844,6 +842,74 @@ function removeATBClient(NexgenATBClient ATBClient) {
       }
     }
   }
+  
+  // Add to disconnected list
+  if(!bDontMove) {
+    ATBClient.nextATBClient = ATBDisconnectedtList;
+    ATBDisconnectedtList = ATBClient;
+  }
+}
+
+/***************************************************************************************************
+ *
+ *  $DESCRIPTION  Removes the specified client from the client list.
+ *  $PARAM        client  The client that is to be removed.
+ *  $REQUIRE      client != none
+ *
+ **************************************************************************************************/
+function NexgenATBClient findATBDisconnectedClient(NexgenClient client) {
+	local NexgenATBClient ATBClient;
+	local bool bFound;
+	
+	// Search for NexgenClient owning this actor.
+	ATBClient = ATBDisconnectedtList;
+	while (!bFound && ATBClient != none) {
+		if (ATBClient.playerID == client.playerID) {
+			bFound = true;
+		} else {
+			ATBClient = ATBClient.nextATBClient;
+		}
+	}
+	
+	// Return result.
+	if (bFound) {
+		return ATBClient;
+	} else {
+		return none;
+	}
+}
+
+/***************************************************************************************************
+ *
+ *  $DESCRIPTION  Removes the specified client from the client list.
+ *  $PARAM        client  The client that is to be removed.
+ *  $REQUIRE      client != none
+ *
+ **************************************************************************************************/
+function removeATBDisconnectedClient(NexgenATBClient ATBClient) {
+  local NexgenATBClient currClient;
+  local bool bDone;
+  
+  // Remove the client from the linked online client list.
+  if (ATBDisconnectedtList == ATBClient) {
+    // First element in the list.
+    ATBDisconnectedtList = ATBClient.nextATBClient;
+  } else {
+    // Somewhere else in the list.
+    currClient = ATBDisconnectedtList;
+    while (!bDone && currClient != none) {
+      if (currClient.nextATBClient == ATBClient) {
+        bDone = true;
+        currClient.nextATBClient = ATBClient.nextATBClient;
+      } else {
+        currClient = currClient.nextATBClient;
+      }
+    }
+  }
+  
+  // Add to active list
+  ATBClient.nextATBClient = ATBClientList;
+  ATBClientList = ATBClient;
 }
 
 /***************************************************************************************************
@@ -852,28 +918,14 @@ function removeATBClient(NexgenATBClient ATBClient) {
  *
  **************************************************************************************************/
 function ATBClientInit(NexgenATBClient ATBClient) {
-  local int midGameJoinToSort;
-  local bool bBetterWait;
-  
   if(control.gInf == none) return;
 
   if( (control.gInf.gameState == control.gInf.GS_Waiting && initialTeamSortTime != 0.0) ||
        control.gInf.gameState == control.gInf.GS_Starting ||
        control.gInf.gameState == control.gInf.GS_Playing) {
-    
-    // Check for other waiting clients
-    for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
-      if(ATBClient.bMidGameJoin && !ATBClient.bTeamAssigned) {
-        if(!ATBClient.bInitialized) bBetterWait = true;
-        else                        midGameJoinToSort++;
-      }
-    }
-    
-    // Sort now?
-    if(!bBetterWait && midGameJoinTeamSortingTime == 0.0 && longestMidGameJoinWaitTime != 0.0 && (control.timeSeconds - longestMidGameJoinWaitTime) > minMidGameJoinWaitTime) {
-      midGameJoinTeamSorting(midGameJoinToSort);
-    } else if(longestMidGameJoinWaitTime == 0) {
-      // First client waiting, sort later
+
+    // The sorting is triggered by the timer; only save longest waiting time here
+    if(longestMidGameJoinWaitTime == 0) {
       longestMidGameJoinWaitTime = control.timeSeconds;
     }
   }
@@ -1036,72 +1088,30 @@ function string getStrengthsString(byte team) {
  **************************************************************************************************/
 function updateStats() {
 	local NexgenATBClient ATBClient;
-  local NexgenPlayerData pDat;
-  local float playTime;
   local int winningTeam;
   local float accScore, accStrength;
-  local float discPlayerScore;
-  local int discPlayerStrength, discPlayerSecondsPlayed, discPlayerConfigIndex;  
+  local float avgScore, avgStrength;
   local int playerAmount;
-  local float normalisedScore;
-  local float oldTotalTimePlayed, oldTotalTimePlayedCopy, newTotalTimePlayed;
-  local int oldStrength, newStrength, strengthDifference;
   
   // Announce
   control.broadcastMsg("<C04>Nexgen Auto Team Balancer is updating player strengths...");
-
   
-  // Gather some data
+  // Determine winning team
   if     (TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[1].Score ==
           TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[0].Score) winningTeam = -1;
-  else if(TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[1].Score ==
+  else if(TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[1].Score >
           TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[0].Score) winningTeam = 1;
 
-  // Accumulate average score and strength for online players
+  // Accumulate score and strength for online players
   for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
-    playTime = ATBClient.playTime + (control.gameEndTime-ATBClient.beginPlayTime);
-    if(ATBClient.bTeamAssigned && playTime > minPlayTimeForUpdate) {
-      ATBClient.playerScore = ATBClient.client.player.PlayerReplicationInfo.Score * (control.gameEndTime-control.gameStartTime)/playTime;
-      
-      // Winning team bonus
-      if(xConf.winningTeamBonus > 0 && playTime > minPlayTimeForWinBonus && ATBClient.client.player.playerReplicationInfo.team == winningTeam) {
-        ATBClient.playerScore += xConf.winningTeamBonus;
-      }
-      
-      // Disallow a score of 0
-      if(ATBClient.playerScore == 0.0) ATBClient.playerScore = -0.1;
-
-      accScore    += ATBClient.playerScore;
-      accStrength += ATBClient.strength;
-      playerAmount++;
-    }
+    if(ATBClient.beginPlayTime > 0.0) ATBClient.playTime += (control.gameEndTime-ATBClient.beginPlayTime);
+    ATBClient.score = ATBClient.client.player.PlayerReplicationInfo.Score;
+    accumScoreStrength(ATBClient, winningTeam, accScore, accStrength, playerAmount);
   }
 
-  // Accumulate average score and strength for disconnected clients
-  for(pDat=control.playerDataList; pDat != none; pDat=pDat.next) {
-    if(pDat.getFloat(PA_DisconnectTime, 0.0) > 0.0) {
-      playTime = pDat.getFloat(PA_PlayTime, 0.0);
-      if(playTime > minPlayTimeForUpdate) {
-        discPlayerScore = pDat.getInt(PA_Score, 0) * (control.gameEndTime-control.gameStartTime)/playTime;
-        
-        // Winning team bonus
-        if(xConf.winningTeamBonus > 0 && playTime > minPlayTimeForWinBonus && pDat.getInt(PA_Team, -2) == winningTeam) {
-          discPlayerScore += xConf.winningTeamBonus;
-        }
-        
-        // Disallow a score of 0
-        if(discPlayerScore == 0.0) discPlayerScore = -0.1;
-        
-        // Load strength from config and accumulate
-        xConf.loadData(pDat.getInt(PA_ConfIndex, -1), discPlayerStrength, discPlayerSecondsPlayed);
-        accScore    += discPlayerScore;
-        accStrength += discPlayerStrength;
-        
-        // Save for later reuse
-        pDat.set(PA_EndScore, discPlayerScore);
-        playerAmount++;
-      }
-    }
+  // Accumulate score and strength for disconnected clients
+  for(ATBClient=ATBDisconnectedtList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
+    accumScoreStrength(ATBClient, winningTeam, accScore, accStrength, playerAmount);
   }
   
   // Nothing to do?
@@ -1111,67 +1121,88 @@ function updateStats() {
   }
   
   // Compute average
-  accScore    /= playerAmount;
-  accStrength /= playerAmount;
+  avgScore    = accScore/playerAmount;
+  avgStrength = accStrength/playerAmount;
   
   // Set min for avg score
-  if(accScore < 2.0) accScore = 2.0;
+  if(avgScore < 2.0) avgScore = 2.0;
   
   // We can now normalise each player's score ...
   for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
-    if(ATBClient.playerScore != 0.0) {
-      // Other magic formular taken from ATB
-      normalisedScore = ATBClient.playerScore * (accStrength * relNormalisationProp + normalisedStrength * (1.0 - relNormalisationProp)) / accScore;
-
-      // Update time and strength
-      playTime = ATBClient.playTime + (control.gameEndTime-ATBClient.beginPlayTime);
-      oldTotalTimePlayed = ATBClient.secondsPlayed;
-      if(oldTotalTimePlayed > hoursBeforeRecyStrength*3600) {
-        oldTotalTimePlayed = hoursBeforeRecyStrength;
-      }
-      newTotalTimePlayed = oldTotalTimePlayed + playTime;
-      oldStrength = ATBClient.strength;
-      newStrength = (oldStrength*oldTotalTimePlayed + normalisedScore*playTime) / newTotalTimePlayed;
-      xConf.updateData(ATBClient.configIndex, newStrength, ATBClient.secondsPlayed + playTime);
-      
-      // Update local data in case somebody wants to see them
-      ATBClient.strength       = newStrength;
-      ATBClient.secondsPlayed += playTime;
-      
-      // Announce to player
-      strengthDifference = newStrength-oldStrength;
-      if     (strengthDifference > 0) ATBClient.client.showMsg("<C02>Strength increased by "$strengthDifference$"! New strength is "$newStrength$".");
-      else if(strengthDifference < 0) ATBClient.client.showMsg("<C00>Strength decreased by "$-strengthDifference$"! New strength is "$newStrength$".");
-      else                            ATBClient.client.showMsg("<C02>Strength maintained at "$newStrength$"!");
-    }
+    updatePlayerStrength(ATBClient, avgScore, avgStrength);
   }
   
   // ... and do the same for disconnected clients
-  for(pDat=control.playerDataList; pDat != none; pDat=pDat.next) {
-    discPlayerScore = pDat.getFloat(PA_EndScore, 0.0);
-    if(discPlayerScore != 0.0) {
-      // Other magic formular taken from ATB
-      normalisedScore = discPlayerScore * (accStrength * relNormalisationProp + normalisedStrength * (1.0 - relNormalisationProp)) / accScore;
-
-      // Update time and strength
-      discPlayerConfigIndex = pDat.getInt(PA_ConfIndex, -1);
-      if(discPlayerConfigIndex > -1) {
-        xConf.loadData(discPlayerConfigIndex, oldStrength, discPlayerSecondsPlayed);
-        oldTotalTimePlayed     = discPlayerSecondsPlayed; 
-        oldTotalTimePlayedCopy = discPlayerSecondsPlayed;
-        playTime = pDat.getFloat(PA_PlayTime, 0.0);
-        if(oldTotalTimePlayed > hoursBeforeRecyStrength*3600) {
-          oldTotalTimePlayed = hoursBeforeRecyStrength;
-        }
-        newTotalTimePlayed = oldTotalTimePlayed + playTime;
-        newStrength = (oldStrength*oldTotalTimePlayed + normalisedScore*playTime) / newTotalTimePlayed;
-        xConf.updateData(discPlayerConfigIndex, newStrength, oldTotalTimePlayedCopy + playTime);
-      }
-    }
+  for(ATBClient=ATBDisconnectedtList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
+    updatePlayerStrength(ATBClient, avgScore, avgStrength);
   }  
 
   // Finally, save config. We are done for this game.
   xConf.saveConfig();
+}
+
+
+/***************************************************************************************************
+ *
+ *  $DESCRIPTION  Accumulates the score and strength of all participating players of this match.
+ *
+ **************************************************************************************************/
+function accumScoreStrength(NexgenATBClient ATBClient, int winningTeam, out float accScore, out float accStrength, out int playerAmount) {
+  if(ATBClient.playTime > minPlayTimeForUpdate) {
+    ATBClient.playerScore = ATBClient.score * (control.gameEndTime-control.gameStartTime)/ATBClient.playTime;
+    
+    // Winning team bonus for online players
+    if(ATBClient.client != none && xConf.winningTeamBonus > 0 && ATBClient.playTime > minPlayTimeForWinBonus && ATBClient.client.player.playerReplicationInfo.team == winningTeam) {
+      ATBClient.playerScore += xConf.winningTeamBonus;
+    }
+    
+    // Disallow a score of 0
+    if(ATBClient.playerScore == 0.0) ATBClient.playerScore = -0.1;
+
+    accScore    += ATBClient.playerScore;
+    accStrength += ATBClient.strength;
+    playerAmount++;
+  }
+}
+
+/***************************************************************************************************
+ *
+ *  $DESCRIPTION  Computes normalised score and updates the strength of each participating player.
+ *
+ **************************************************************************************************/
+function updatePlayerStrength(NexgenATBClient ATBClient, float avgScore, float avgStrength) {
+  local float normalisedScore;
+  local float oldTotalTimePlayed, newTotalTimePlayed;
+  local int oldStrength, newStrength, strengthDifference;
+
+  if(ATBClient.playerScore != 0.0) {
+    // Other magic formular taken from ATB
+    normalisedScore = ATBClient.playerScore * (avgStrength * relNormalisationProp + normalisedStrength * (1.0 - relNormalisationProp)) / avgScore;
+    log("[NATB] normalizedScore of "$ATBClient.playerID$"="$normalisedScore);
+    log("[NATB] ATBClient.playTime="$ATBClient.playTime);
+
+    // Update time and strength
+    oldTotalTimePlayed = ATBClient.secondsPlayed;
+    if(oldTotalTimePlayed > hoursBeforeRecyStrength*3600) {
+      oldTotalTimePlayed = hoursBeforeRecyStrength*3600;
+    }
+    newTotalTimePlayed = oldTotalTimePlayed + ATBClient.playTime;
+    oldStrength = ATBClient.strength;
+    newStrength = (oldStrength*oldTotalTimePlayed + normalisedScore*ATBClient.playTime) / newTotalTimePlayed;
+    xConf.updateData(ATBClient.configIndex, newStrength, ATBClient.secondsPlayed + ATBClient.playTime);
+    
+    // Update local data in case somebody wants to see them
+    ATBClient.strength       = newStrength;
+    ATBClient.secondsPlayed += ATBClient.playTime;
+    
+    // Announce to player
+    if(ATBClient.client != none) {
+      strengthDifference = newStrength-oldStrength;
+      if     (strengthDifference > 0) ATBClient.client.showMsg("<C02>Strength increased by "$strengthDifference$"! New strength is "$newStrength$".");
+      else if(strengthDifference < 0) ATBClient.client.showMsg("<C00>Strength decreased by "$-strengthDifference$"! New strength is "$newStrength$".");
+      else                            ATBClient.client.showMsg("<C02>Strength retained at "$newStrength$"!");
+    }
+  }
 }
 
 /***************************************************************************************************
@@ -1189,5 +1220,5 @@ defaultproperties
      TeamColor(3)=(R=255,G=255,B=0,A=32)
      pluginName="Nexgen Auto Team Balancer"
      pluginAuthor="Sp0ngeb0b"
-     pluginVersion="0.15"
+     pluginVersion="0.20"
 }

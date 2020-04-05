@@ -6,17 +6,25 @@ var NexgenATB xControl;
 var NexgenATBConfig xConf;
 var NexgenATBClient nextATBClient;
 
-// Data
+// Identifier
+var string playerID;
+
+// Persistent config data
 var int configIndex;
 var int strength;
 var int secondsPlayed;
+
+// Persistent game data
+var byte team;
+var int   score;
+var float beginPlayTime;
+var float playTime;
+var float disconnectedTime;
 
 // Miscellaneous 
 var bool  bTeamAssigned;       
 var bool  bMidGameJoin;
 var bool  bTeamSwitched; 
-var float beginPlayTime;
-var float playTime;
 
 // Used for updating the strength
 var float playerScore;
