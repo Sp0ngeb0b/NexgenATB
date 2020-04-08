@@ -1025,14 +1025,14 @@ function bool handleOurMsgCommands(PlayerPawn sender, string msg) {
       if(initialTeamSortTime == 0) client.showMsg("<C00>Teams not yet assigned.");
       else { 
         client.showMsg("<C04>Red team strength is "$int(getTeamStrengthWithFlagStrength(0))$", Blue team strength is "$int(getTeamStrengthWithFlagStrength(1))$" (difference -"$int(abs(getTeamStrengthWithFlagStrength(0)-getTeamStrengthWithFlagStrength(1)))$").");
-        client.showMsg("<C04>Say '!strengths' for more details.");
+        client.showMsg("<C04>Say '!str' for more details.");
       }
     break;
     
     // Detailed strength info requested?
-    case "!strengths": client.showMsg("<C04>Usage: '!strengths <red/blue>'"); break;
-    case "!strengths red": case "!strengths 0":  teamStrengthToShow = 0; break;
-    case "!strengths blue": case "!strengths 1": teamStrengthToShow = 1; break;
+    case "!strengths": case "!str": client.showMsg("<C04>Usage: '!str <red/blue>'"); break;
+    case "!strengths red": case "!str red":  teamStrengthToShow = 0; break;
+    case "!strengths blue": case "!str blue": teamStrengthToShow = 1; break;
 
     // Not a command.
     default: bIsCommand = false;
@@ -1222,5 +1222,5 @@ defaultproperties
      TeamColor(3)=(R=255,G=255,B=0,A=32)
      pluginName="Nexgen Auto Team Balancer"
      pluginAuthor="Sp0ngeb0b"
-     pluginVersion="0.21"
+     pluginVersion="0.22"
 }
