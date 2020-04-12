@@ -787,8 +787,8 @@ function midGameRebalanceTeamSize() {
   
   // Announce strengths
   control.broadcastMsg("<C04>Nexgen Auto Team Balancer moved "$movedPlayerAmount$" player(s) due to unbalanced team sizes!");
-  control.broadcastMsg("<C04>Red team strength is "$getTeamStrengthWithFlagStrength(0)$", Blue team strength is "$getTeamStrengthWithFlagStrength(1)$".");
-  
+  control.broadcastMsg("<C04>Red team strength is "$  Left(getTeamStrengthWithFlagStrength(0), InStr(getTeamStrengthWithFlagStrength(0), ".")+3)$
+                       ", Blue team strength is "$  Left(getTeamStrengthWithFlagStrength(1), InStr(getTeamStrengthWithFlagStrength(1), ".")+3)$".");
   // Reset
   lastStrengthChangeTime = control.timeSeconds;
 }
@@ -1222,5 +1222,5 @@ defaultproperties
      TeamColor(3)=(R=255,G=255,B=0,A=32)
      pluginName="Nexgen Auto Team Balancer"
      pluginAuthor="Sp0ngeb0b"
-     pluginVersion="0.22"
+     pluginVersion="0.23"
 }
