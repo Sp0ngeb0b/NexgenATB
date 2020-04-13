@@ -51,10 +51,6 @@ const maxReconnectWaitTime     = 8.0;          // Max amount of seconds to wait 
 const oddPlayerChangeThreshold = 10;           // Threshold in strength difference improvement after which the last player will switch teams in case off an odd player amount
 const prefToChangeNewPlayers   = 0.5;          // Factor how to weight playtime into mid-game rebalances [0,1]. 
 const flagCarrierFactor        = 10.0;         // Rating punishment if client is a flag carrier (>=1).
-
-const bWindowedStrengthMsgs    = false;        // Whether to print the detailed strength info as a windowed PM. This avoids the client message on the top left, but there must be
-                                               // several players per line. If this is set to false, proper formatting with one player per line is possible in the PM history tab,
-                                               // but the client message on the top left will be displayed.
                                                
 const minPlayTimeForUpdate     = 90;           // Min time in seconds a player must have been on the server to update his strength   
 const minPlayTimeForWinBonus   = 180;          // Min time in seconds a player must have been on the server to get the winning team bonus
@@ -1028,7 +1024,6 @@ function getTeamSizes(out int teamSizes[2], optional bool bExcludeWaitingPlayers
 function bool handleOurMsgCommands(PlayerPawn sender, string msg) {
   local string cmd;
   local bool bIsCommand;
-  local int teamStrengthToShow;
   local NexgenClient client;
   
   client = control.getClient(sender);
@@ -1037,7 +1032,6 @@ function bool handleOurMsgCommands(PlayerPawn sender, string msg) {
 
   cmd = class'NexgenUtil'.static.trim(msg);
   bIsCommand = true;
-  teamStrengthToShow = -1;
   switch (cmd) {
     case "!teams": case "!team": case "!t": case "!stats":
       if(initialTeamSortTime == 0) client.showMsg("<C00>Teams not yet assigned.");
@@ -1047,19 +1041,15 @@ function bool handleOurMsgCommands(PlayerPawn sender, string msg) {
       }
     break;
     
-    // Detailed strength info requested?
-    case "!strengths": case "!str": client.showMsg("<C04>Usage: '!str <red/blue>'"); break;
-    case "!strengths red": case "!str red":  teamStrengthToShow = 0; break;
-    case "!strengths blue": case "!str blue": teamStrengthToShow = 1; break;
+    // Display detailed strength info via Nexgen's PM function (proper formatting and accessible as server side only plugin)
+    case "!strengths": case "!str": 
+        NexgenClientCore(client.getController(class'NexgenClientCore'.default.ctrlID)).receivePM(client.playerID, client.player.playerReplicationInfo, getStrengthsString(0), false, true);
+        NexgenClientCore(client.getController(class'NexgenClientCore'.default.ctrlID)).receivePM(client.playerID, client.player.playerReplicationInfo, getStrengthsString(1), false, true);
+        client.showPanel(class'NexgenRCPPrivateMsg'.default.panelIdentifier);
+    break;
 
     // Not a command.
     default: bIsCommand = false;
-  }
-  
-  // Display detailed strength info via Nexgen's PM function (proper formatting and accessible as server side only plugin)
-  if(teamStrengthToShow != -1) {
-    NexgenClientCore(client.getController(class'NexgenClientCore'.default.ctrlID)).receivePM(client.playerID, client.player.playerReplicationInfo, getStrengthsString(teamStrengthToShow), bWindowedStrengthMsgs, true);
-    if(!bWindowedStrengthMsgs) client.showPanel(class'NexgenRCPPrivateMsg'.default.panelIdentifier);
   }
 
   return bIsCommand;  
@@ -1081,21 +1071,16 @@ function string getStrengthsString(byte team) {
   getTeamSizes(teamSizes, true);
   sortTeamClientsByStrength(teamSizes[team], team, sortedATBClients);
   
-  // Which mode?
-  if(bWindowedStrengthMsgs) seperatorToken = "  |  ";
-  else {
-    seperatorToken = newLineToken;
-    res = newLineToken$newLineToken;
-  }
-  
+  seperatorToken = newLineToken;
+  res = newLineToken$newLineToken;
+
   // Construct string
-  res = res$"Nexgen Auto Team Balancer "$TeamGamePlus(Level.Game).Teams[team].TeamName$" Team Strengths:"$newLineToken;
-  if(!bWindowedStrengthMsgs) res = res $newLineToken;
+  res = res$"Nexgen Auto Team Balancer "$TeamGamePlus(Level.Game).Teams[team].TeamName$" Team Strengths:"$newLineToken$newLineToken;
   for(i=0; i<teamSizes[team]; i++) {
     hrsPlayed = sortedATBClients[i].secondsPlayed/3600.0;
-    res = res$sortedATBClients[i].client.playerName$": "$Left(sortedATBClients[i].strength, InStr(sortedATBClients[i].strength, ".")+3)$" ("$Left(hrsPlayed, InStr(hrsPlayed, ".")+3)$"hrs)";
-    if(i != teamSizes[team]-1) res = res$seperatorToken;
+    res = res$sortedATBClients[i].client.playerName$": "$Left(sortedATBClients[i].strength, InStr(sortedATBClients[i].strength, ".")+3)$" ("$Left(hrsPlayed, InStr(hrsPlayed, ".")+3)$"hrs)"$seperatorToken;
   }
+  res = res$seperatorToken;
   
   return res;
 }
