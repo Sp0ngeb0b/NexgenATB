@@ -53,7 +53,7 @@ function install() {
  *
  **************************************************************************************************/
 function installVersion001() {
-	defaultStrength = 40;
+	defaultStrength = 30;
 	teamScoreBonus = 10;
   winningTeamBonus = 5;
 }
