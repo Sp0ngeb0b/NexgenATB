@@ -21,12 +21,12 @@ var NexgenATBClient ATBClientList;             // First client of our own client
 var NexgenATBClient ATBDisconnectedtList;      // First client of our own disconnected client list.
 
 // Team specific vars
-var float teamStrength[2];                     // Current accumulated strength of the teams (without flag strength) 
+var float teamStrength[2];                     // Current accumulated strength of the teams (without flag strength). 
 var float teamScore[2];                        // Last known team score, used to detect changes of accumulated flag strength.
 
 // Time vars
-var float waitFinishTime;                      // Time at which the initial waiting timer at gamestart ran out 
-var float initialTeamSortTime;                 // Time at which the initial team sorting took place
+var float waitFinishTime;                      // Time at which the initial waiting timer at gamestart ran out.
+var float initialTeamSortTime;                 // Time at which the initial team sorting took place.
 var float midGameJoinTeamSortingTime;          // Time at which the latest mid-game-join sorting took place. Will be reset to 0 once players left waiting mode.
 var float longestMidGameJoinWaitTime;          // Time at which the earliest mid-game-joined client was ready to be sorted.
 var float lastDisconnectTime;                  // Last time a player disconnected.
@@ -34,32 +34,32 @@ var float lastStrengthChangeTime;              // Last time the strength of the 
 
 // Other vars
 var int numCurrPlayers;                        // Current amount of players (can be in waiting state). Used to detect when only a single player is connected.
-var bool endStatsUpdated;
+var bool bStrengthsUpdated;                    // Strengths updated at end of game?
 
 // Resources
 var Sound startSound, playSound, teamSound[2];
 var Color colorWhite, colorOrange, TeamColor[4];
 
 // Constants
-const minSinglePlayerWaitTime  = 10.0;         // Min amount of seconds a single player in the server has to wait before the game starts
-const maxInitWaitTime          = 5.0;          // Max amount of seconds the initial sorting can be delayed when waiting for a client to init
-const gameStartDelay           = 2.5;          // Amount of seconds to wait after a team is assigned before proceeding
-const minMidGameJoinWaitTime   = 3.0;          // Min amount of seconds a mid-game joined player waits for team assignment (starting at ATBClient initialization) 
-const maxMidGameJoinWaitTime   = 5.0;          // Max amount of seconds until a team is assigned for mid-game joined players (starting at ATBClient initialization) 
+const minSinglePlayerWaitTime  = 10.0;         // Min amount of seconds a single player in the server has to wait before the game starts.
+const maxInitWaitTime          = 5.0;          // Max amount of seconds the initial sorting can be delayed when waiting for a client to init.
+const gameStartDelay           = 2.5;          // Amount of seconds to wait after a team is assigned before proceeding.
+const minMidGameJoinWaitTime   = 3.0;          // Min amount of seconds a mid-game joined player waits for team assignment (starting at ATBClient initialization). 
+const maxMidGameJoinWaitTime   = 5.0;          // Max amount of seconds until a team is assigned for mid-game joined players (starting at ATBClient initialization). 
 const maxReconnectWaitTime     = 8.0;          // Max amount of seconds to wait for a player to reconnect. Teams will not be rebalanced until then, except new player join. 
 
-const oddPlayerChangeThreshold = 10;           // Threshold in strength difference improvement after which the last player will switch teams in case off an odd player amount
+const oddPlayerChangeThreshold = 10;           // Threshold in strength difference improvement after which the last player will switch teams in case off an odd player amount.
 const prefToChangeNewPlayers   = 0.5;          // Factor how to weight playtime into mid-game rebalances [0,1]. 
 const flagCarrierFactor        = 10.0;         // Rating punishment if client is a flag carrier (>=1).
                                                
-const minPlayTimeForUpdate     = 90;           // Min time in seconds a player must have been on the server to update his strength   
-const minPlayTimeForWinBonus   = 180;          // Min time in seconds a player must have been on the server to get the winning team bonus
+const minPlayTimeForUpdate     = 90;           // Min time in seconds a player must have been on the server to update his strength.   
+const minPlayTimeForWinBonus   = 180;          // Min time in seconds a player must have been on the server to get the winning team bonus.
 
 const endUpdateDelay           = 3.0;          // Seconds to wait before updating the database on game end.
-const minPlayerAmount          = 2;            // Min amount of participating players to update the stats.
-const normalisedStrength       = 50;
-const relNormalisationProp     = 0.5;   
-const hoursBeforeRecyStrength  = 4.0;    
+const minPlayerAmount          = 2;            // Min amount of participating players to update the strengths.
+const normalisedStrength       = 50;           // Average strength we are aiming for when normalising.
+const relNormalisationProp     = 0.5;          // Percentage to weight the total average strength of participating players when normalising [0,1].
+const hoursBeforeRecyStrength  = 4.0;          // Amount of hours played to consider when weighting strength of current game against saved strength.
                                         
 const newLineToken = "\\n";                    // Token used to detect new lines in texts
 
@@ -75,7 +75,8 @@ function bool initialize() {
 
   if(TeamGamePlus(Level.Game) == none || TeamGamePlus(Level.Game).MaxTeams != 2) return false;
 
-  if(!control.sConf.enableNexgenStartControl) {
+  // Disable for the current game?
+  if(!control.sConf.enableNexgenStartControl || control.sConf.matchModeActivated) {
     TeamGamePlus(Level.Game).bBalanceTeams = true;
     return false;
   } else {
@@ -434,7 +435,7 @@ function tick(float deltaTime) {
     }
     
     // Check for team score changes
-    if(xConf.flagStrength != 0) {
+    if(xConf.teamScoreBonus != 0) {
       if(teamScore[0] != TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[0].Score ||
          teamScore[1] != TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[1].Score) {
         teamScore[0] = TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[0].Score;
@@ -444,11 +445,11 @@ function tick(float deltaTime) {
     }
   }
   
-  // Game-ended state: Trigger stats update.
+  // Game-ended state: Trigger strengths update.
   if(control.gInf != none && control.gInf.gameState == control.gInf.GS_Ended) {
-    if(!endStatsUpdated && (control.timeSeconds - control.gameEndTime) > endUpdateDelay) {
-      updateStats();
-      endStatsUpdated = true;
+    if(!bStrengthsUpdated && (control.timeSeconds - control.gameEndTime) > endUpdateDelay) {
+      updateStrengths();
+      bStrengthsUpdated = true;
     }
   }  
 }
@@ -534,7 +535,7 @@ function sortNewClientsByStrength(int amount, out NexgenATBClient sortedATBClien
     }
 
     if(max == -1) {
-      log("[NATB]: max == -1!");
+      control.nscLog("[NATB] max == -1!");
       break;
     }
     
@@ -571,7 +572,7 @@ function sortTeamClientsByStrength(int amount, byte team, out NexgenATBClient so
     }
 
     if(max == -1) {
-      log("[NATB]: max == -1 at team sorting!");
+      control.nscLog("[NATB] max == -1 at team sorting!");
       break;
     }
     
@@ -646,7 +647,7 @@ function initialTeamSorting(int numPlayersInitialized) {
   
   // If there is an odd number of players put the last player in the weakest team
   if((numPlayersInitialized&1) == 1) {
-    if(getTeamStrengthWithFlagStrength(0) > getTeamStrengthWithFlagStrength(1)) weakerTeam = 1;  
+    if(getTeamStrength(0) > getTeamStrength(1)) weakerTeam = 1;  
     
     assignTeam(sortedATBClients[numPlayersInitialized-1], weakerTeam);
   }
@@ -680,7 +681,7 @@ function midGameJoinTeamSorting(int midGameJoinToSort) {
   sortNewClientsByStrength(midGameJoinToSort, sortedATBClients);
   
   // Work out weakest team
-  if(getTeamStrengthWithFlagStrength(0) > getTeamStrengthWithFlagStrength(1)) weakerTeam = 1;  
+  if(getTeamStrength(0) > getTeamStrength(1)) weakerTeam = 1;  
   strongerTeam = int(!bool(weakerTeam));
   
   // Get current team sizes (excluding joined players)
@@ -705,7 +706,7 @@ function midGameJoinTeamSorting(int midGameJoinToSort) {
   // Update weaker/stronger team if required
   if(start != 0 || end != midGameJoinToSort) {
     weakerTeam   = 0;
-    if(getTeamStrengthWithFlagStrength(0) > getTeamStrengthWithFlagStrength(1)) weakerTeam = 1;  
+    if(getTeamStrength(0) > getTeamStrength(1)) weakerTeam = 1;  
     strongerTeam = int(!bool(weakerTeam));
   }
 
@@ -757,7 +758,7 @@ function midGameRebalanceTeamSize() {
   if(sizeDifference <= 1) return;
 
   // Oops, larger team is weaker than the smaller team! Move weakest players.
-  if(getTeamStrengthWithFlagStrength(largerTeam) < getTeamStrengthWithFlagStrength(smallerTeam)) {
+  if(getTeamStrength(largerTeam) < getTeamStrength(smallerTeam)) {
     // Get sorted strenghts
     sortTeamClientsByStrength(teamSizes[largerTeam], largerTeam, sortedATBClientsLargerTeam);
     nextPlayerToMove = teamSizes[largerTeam] - 1;
@@ -778,7 +779,7 @@ function midGameRebalanceTeamSize() {
   
   } else {    
     do {
-      strengthDifference = getTeamStrengthWithFlagStrength(largerTeam) - getTeamStrengthWithFlagStrength(smallerTeam);
+      strengthDifference = getTeamStrength(largerTeam) - getTeamStrength(smallerTeam);
       preferedATBClient = getBestSwitch(largerTeam, strengthDifference);
       
       // Manual check when player amount is odd
@@ -801,8 +802,8 @@ function midGameRebalanceTeamSize() {
   
   // Announce strengths
   control.broadcastMsg("<C04>Nexgen Auto Team Balancer moved "$movedPlayerAmount$" player(s) due to unbalanced team sizes!");
-  control.broadcastMsg("<C04>Red team strength is "$  Left(getTeamStrengthWithFlagStrength(0), InStr(getTeamStrengthWithFlagStrength(0), ".")+3)$
-                       ", Blue team strength is "$  Left(getTeamStrengthWithFlagStrength(1), InStr(getTeamStrengthWithFlagStrength(1), ".")+3)$".");
+  control.broadcastMsg("<C04>Red team strength is "$  Left(getTeamStrength(0), InStr(getTeamStrength(0), ".")+3)$
+                       ", Blue team strength is "$  Left(getTeamStrength(1), InStr(getTeamStrength(1), ".")+3)$".");
   // Reset
   lastStrengthChangeTime = control.timeSeconds;
 }
@@ -991,8 +992,8 @@ function assignTeam(NexgenATBClient ATBClient, byte newTeam) {
  *  $DESCRIPTION  Team strengths including flag bonus
  *
  **************************************************************************************************/
-function float getTeamStrengthWithFlagStrength(byte teamNum) {
-  return teamStrength[teamNum] + TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[teamNum].Score * xConf.flagStrength;
+function float getTeamStrength(byte teamNum) {
+  return teamStrength[teamNum] + TournamentGameReplicationInfo(Level.Game.GameReplicationInfo).Teams[teamNum].Score * xConf.teamScoreBonus;
 }
 
 /***************************************************************************************************
@@ -1033,10 +1034,10 @@ function bool handleOurMsgCommands(PlayerPawn sender, string msg) {
   cmd = class'NexgenUtil'.static.trim(msg);
   bIsCommand = true;
   switch (cmd) {
-    case "!teams": case "!team": case "!t": case "!stats":
+    case "!teams": case "!team": case "!t":
       if(initialTeamSortTime == 0) client.showMsg("<C00>Teams not yet assigned.");
       else { 
-        client.showMsg("<C04>Red team strength is "$int(getTeamStrengthWithFlagStrength(0))$", Blue team strength is "$int(getTeamStrengthWithFlagStrength(1))$" (difference -"$int(abs(getTeamStrengthWithFlagStrength(0)-getTeamStrengthWithFlagStrength(1)))$").");
+        client.showMsg("<C04>Red team strength is "$int(getTeamStrength(0))$" (+"$int(getTeamStrength(0)-teamStrength[0])$"), Blue team strength is "$int(getTeamStrength(1))$" (+"$int(getTeamStrength(1)-teamStrength[1])$"), difference -"$int(abs(getTeamStrength(0)-getTeamStrength(1)))$".");
         client.showMsg("<C04>Say '!str' for more details.");
       }
     break;
@@ -1090,7 +1091,7 @@ function string getStrengthsString(byte team) {
  *  $DESCRIPTION  Updates the database.
  *
  **************************************************************************************************/
-function updateStats() {
+function updateStrengths() {
 	local NexgenATBClient ATBClient;
   local int winningTeam;
   local float accScore, accStrength;
@@ -1109,7 +1110,7 @@ function updateStats() {
   // Accumulate score and strength for online players
   for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
     if(ATBClient.beginPlayTime > 0.0) ATBClient.playTime += (control.gameEndTime-ATBClient.beginPlayTime);
-    else log("[NATB] ATBClient.beginPlayTime is 0.0 for "$ATBClient.playerID);
+    else control.nscLog("[NATB] ATBClient.beginPlayTime is 0.0 for "$ATBClient.playerID);
     ATBClient.score = ATBClient.client.player.PlayerReplicationInfo.Score;
     accumScoreStrength(ATBClient, winningTeam, accScore, accStrength, playerAmount);
   }
@@ -1183,8 +1184,8 @@ function updatePlayerStrength(NexgenATBClient ATBClient, float avgScore, float a
   if(ATBClient.playerScore != 0.0) {
     // Other magic formular taken from ATB
     normalisedScore = ATBClient.playerScore * (avgStrength * relNormalisationProp + normalisedStrength * (1.0 - relNormalisationProp)) / avgScore;
-    log("[NATB] normalizedScore of "$ATBClient.playerID$"="$normalisedScore);
-    log("[NATB] ATBClient.playTime="$ATBClient.playTime);
+    control.nscLog("[NATB] normalizedScore of "$ATBClient.playerID$"="$normalisedScore);
+    control.nscLog("[NATB] ATBClient.playTime="$ATBClient.playTime);
 
     // Update time and strength
     oldTotalTimePlayed = ATBClient.secondsPlayed;
@@ -1225,6 +1226,6 @@ defaultproperties
      TeamColor(3)=(R=255,G=255,B=0,A=32)
      pluginName="Nexgen Auto Team Balancer"
      pluginAuthor="Sp0ngeb0b"
-     pluginVersion="0.23"
-     versionNum=023
+     pluginVersion="0.30"
+     versionNum=030
 }

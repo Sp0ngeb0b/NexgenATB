@@ -15,7 +15,7 @@
  *
  * Since it is impossible in Nexgen to get rid of the build-in team balancer message, we at least want it to stop interfering with our message commands.
  * We hook this mutator into the message mutator chain right before Nexgen and simply skip the call to it.
- * While at it, also skip the call to NexgenPlus since it adds the !stats command for toggling the SmartCTF scoreboard.
+ * This will work as long as no other NexgenPlugin spawns its own message mutator. In case it does, we warn the admin about the ServerActor line order.
  *
  */
 class NexgenATBMessageMutator extends Mutator;
@@ -34,10 +34,13 @@ function preBeginPlay() {
   // This is called after Nexgen's preBeginPlay so we will be in front of it in the chain
   level.game.registerMessageMutator(self);
   
-  // Get next message mutator beside Nexgen and NexgenPlus
+  // Get next message mutator beside Nexgen
   otherNextMessageMutator = nextMessageMutator;
-  while(otherNextMessageMutator != none && (InStr(otherNextMessageMutator.class.name, "NexgenController") != -1 || InStr(otherNextMessageMutator.class.name, "NXPMain") != -1)) {
+  if(otherNextMessageMutator != none && (InStr(otherNextMessageMutator.class.name, "NexgenController") != -1)) {
     otherNextMessageMutator = otherNextMessageMutator.nextMessageMutator;
+  } else {
+    ATBControl.control.nscLog("[NATB] Next message mutator is not the NexgenController!");
+    ATBControl.control.nscLog("[NATB] You are advised to add the NexgenATB.NexgenATB ServerActor directly after the NexgenActor line!");
   }
 }
 

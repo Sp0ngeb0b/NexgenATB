@@ -18,9 +18,9 @@ var NexgenATB xControl;
 var config int lastInstalledVersion;
 
 // Config variables
-var config int defaultStrength;
-var config int flagStrength;
-var config int winningTeamBonus;
+var config int defaultStrength;     // The default strength new (unknown) players start with.  
+var config int teamScoreBonus;      // Additional strength bonus per team score point.
+var config int winningTeamBonus;    // Additional score rewarded to player strength calculation when finishing on winning team.
 
 // Special sounds
 var config string startSound;
@@ -54,7 +54,7 @@ function install() {
  **************************************************************************************************/
 function installVersion001() {
 	defaultStrength = 40;
-	flagStrength = 5;
+	teamScoreBonus = 10;
   winningTeamBonus = 5;
 }
 
