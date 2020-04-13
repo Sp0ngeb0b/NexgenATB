@@ -1,4 +1,19 @@
+/*##################################################################################################
+##
+##  Nexgen Auto Team Balancer BETA
+##  Copyright (C) 2020 Patrick "Sp0ngeb0b" Peltzer
+##
+##  This program is free software; you can redistribute and/or modify
+##  it under the terms of the Open Unreal Mod License version 1.1.
+##
+##  Contact: spongebobut@yahoo.com | www.unrealriders.eu
+##
+##  Based on AutoTeamBalance by nogginBasher.
+##
+##################################################################################################*/
 class NexgenATB extends NexgenPlugin;
+
+var int versionNum;                            // Plugin version number.
 
 // References
 var NexgenATBConfig xConf;                     // Plugin configuration.
@@ -77,6 +92,9 @@ function bool initialize() {
   } else {
     xConf = spawn(class'NexgenATBConfigSys', self);
   }
+  if(xConf == none) return false;
+  xConf.xControl = self;
+  xConf.install();
   
   // Load sounds
   startSound   = Sound(dynamicLoadObject(xConf.startSound, class'Sound'));
@@ -1071,7 +1089,7 @@ function string getStrengthsString(byte team) {
   }
   
   // Construct string
-  res = res$"Nexgen Auto Team Balance "$TeamGamePlus(Level.Game).Teams[team].TeamName$" Team Strengths:"$newLineToken;
+  res = res$"Nexgen Auto Team Balancer "$TeamGamePlus(Level.Game).Teams[team].TeamName$" Team Strengths:"$newLineToken;
   if(!bWindowedStrengthMsgs) res = res $newLineToken;
   for(i=0; i<teamSizes[team]; i++) {
     hrsPlayed = sortedATBClients[i].secondsPlayed/3600.0;
@@ -1223,4 +1241,5 @@ defaultproperties
      pluginName="Nexgen Auto Team Balancer"
      pluginAuthor="Sp0ngeb0b"
      pluginVersion="0.23"
+     versionNum=023
 }

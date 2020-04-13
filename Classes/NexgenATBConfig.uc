@@ -1,15 +1,62 @@
-class NexgenATBConfig extends NexgenPluginConfig;
+/*##################################################################################################
+##
+##  Nexgen Auto Team Balancer BETA
+##  Copyright (C) 2020 Patrick "Sp0ngeb0b" Peltzer
+##
+##  This program is free software; you can redistribute and/or modify
+##  it under the terms of the Open Unreal Mod License version 1.1.
+##
+##  Contact: spongebobut@yahoo.com | www.unrealriders.eu
+##
+##  Based on AutoTeamBalance by nogginBasher.
+##
+##################################################################################################*/
+class NexgenATBConfig extends Info;
 
+// Version controlling
+var NexgenATB xControl;                
+var config int lastInstalledVersion;
+
+// Config variables
+var config int defaultStrength;
+var config int flagStrength;
+var config int winningTeamBonus;
+
+// Special sounds
 var config string startSound;
 var config string playSound;
 var config string teamSound[2];
 
-var config int defaultStrength;
-var config int flagStrength;
-var config int winningTeamBonus;
+// Database
 var config string playerData[2048]; // ID,Strength,SecondsPlayed
 
 const separator = ",";
+
+/***************************************************************************************************
+ *
+ *  $DESCRIPTION  Automatically installs the plugin.
+ *  $ENSURE       lastInstalledVersion >= xControl.versionNum
+ *
+ **************************************************************************************************/
+function install() {
+	if (lastInstalledVersion < 001) installVersion001();
+
+	if (lastInstalledVersion < xControl.versionNum) {
+		lastInstalledVersion = xControl.versionNum;
+		saveConfig();
+	}
+}
+
+/***************************************************************************************************
+ *
+ *  $DESCRIPTION  Automatically installs version 001 of the plugin.
+ *
+ **************************************************************************************************/
+function installVersion001() {
+	defaultStrength = 40;
+	flagStrength = 5;
+  winningTeamBonus = 5;
+}
 
 /***************************************************************************************************
  *
@@ -56,12 +103,6 @@ function string getDate() {
  *  $DESCRIPTION  Default properties block.
  *
  **************************************************************************************************/
-defaultproperties {
- startSound="UrSGrappleSounds.Start",
- playSound="UrSGrappleSounds.Play",
- teamSound(0)="UrSGrappleSounds.OnRed",
- teamSound(1)="UrSGrappleSounds.OnBlue",
- defaultStrength=40
- flagStrength=5
- winningTeamBonus=5
+defaultproperties 
+{
 }
