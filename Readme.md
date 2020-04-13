@@ -90,7 +90,7 @@ The plugin doesn't offer a lot of user interaction possibilities; however, the f
 
  - Defrost for developing [Nexgen](https://github.com/dscheerens/nexgen)
  - nogginBasher for developing [AutoTeamBalance](https://github.com/joeytwiddle/code/tree/master/code/unrealscript/AutoTeamBalance)
-  - Note that NexgenATB partly uses code from ATB
+   - Note that NexgenATB partly uses code from ATB
    
 ---
 
