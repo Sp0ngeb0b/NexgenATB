@@ -97,6 +97,6 @@ The plugin doesn't offer a lot of user interaction possibilities; however, the f
 **Contact**
 -
 
-**Author**: Patrick "Sp0ngeb0b" Peltzer
-**Website**: https://www.unrealriders.eu
-**Email**:spongebobut@yahoo.com
+**Author**: Patrick "Sp0ngeb0b" Peltzer  
+**Website**: https://www.unrealriders.eu  
+**Email**: spongebobut@yahoo.com
