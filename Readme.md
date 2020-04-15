@@ -15,8 +15,7 @@ The mod is is still in beta testing; you can access the latest version from [her
 **Known limitations:**
 
  - NexgenATB only supports teamgames with 2 teams
- - Bot support is not considered at the moment; this might lead to uneven team sizes
- 
+ - NexgenATB will not move players automatically when the team size is not uneven (3 vs 2 for example); in this case, players are encouraged to manually switch the teams (to either make it 2 vs 3 and balanced _or_ 4 vs 1 in order to trigger NexgenATB automatic rebalancing). This feature is open for discussion and some kind of player voting to rebalance even in case of even team sizes might be implemented. 
 
 ---
 **Description**
@@ -25,8 +24,6 @@ The mod is is still in beta testing; you can access the latest version from [her
 NexgenATB will automatically manage the team assignment on your gameserver and aims to provide as even teams as possible for fair gameplay. This is done by ranking each player with a so-called *strength* value, which is put together by the player's score at the end of each game. The more often a player plays on your server, the more accurate will the strength rating for him become.
 
 At the start of the game, NexgenATB will perform an initial team sorting. After that, new players joining will be put into the weaker team. In case of several players joining at the same time (e.g. spectators entering the match together), their strengths will be considered completely for the individual team assignment. In case of teams becoming uneven in size (3 vs 1 for example), NexgenATB will automatically rebalance the teams accordingly, considering the strengths and the current gametime of the players; i.e. players joining mid-game are more likely to get moved than players playing from the beginning on.
-
-NexgenATB will not move players automatically in case the team size is not uneven (3 vs 2 for example); in this case, players are encouraged to manually switch the teams (to make it 2 vs 3 or 4 vs 1 to trigger NexgenABM automatic rebalancing). This feature is open for discussion and some kind of player voting to rebalance even in case of even team sizes might be implemented.
 
 ---
 
@@ -68,7 +65,7 @@ NexgenATB currently comes with way less configuration options than the original 
 |teamScoreBonus  |int|10|Additional strength bonus per team score point.
 |winningTeamBonus|int|5 |Additional score rewarded to player strength calculation when finishing on winning team.
 
-**Note**: For NexgenATB to be active, you to enable the `enableNexgenStartControl` option in Nexgen! Also, the plugin will automatically be disabled in case the Nexgen match mode is activated.
+**Note**: For NexgenATB to be active, you to enable the `enableNexgenStartControl` option in Nexgen! Also, the plugin will automatically be disabled in case the Nexgen match mode or tournament mode is activated.
 
 ---
 
