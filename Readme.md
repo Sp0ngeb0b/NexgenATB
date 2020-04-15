@@ -39,7 +39,7 @@ NexgenATB will not move players automatically in case the team size is not uneve
 - In case of uneven team sizes, NexgenATB waits a fair amount of time in case a player has lost connection / needs to **reconnect**.
 - Players who **leave before the game ends** and the strengths are updated are also considered for the computation and their strength is updated as well.
 - Only the **real play time** of player's are considered; i.e. when they go spectate for 5 minutes during a game, this time will not be considered in the final strength calculation. This also provides full compatibility with Nexgen's stats restoring functionality.
-- The system fully utilizes **Nexgen's game** states and therefore the option `Let Nexgen handle the gamestart` can be enabled, including the corresponding countdown.
+- The system fully utilizes **Nexgen's game states** and therefore the option `Let Nexgen handle the gamestart` can be enabled, including the corresponding countdown.
 
 ---
 
@@ -90,7 +90,7 @@ The plugin doesn't offer a lot of user interaction possibilities; however, the f
 
  - Defrost for developing [Nexgen](https://github.com/dscheerens/nexgen)
  - nogginBasher for developing [AutoTeamBalance](https://github.com/joeytwiddle/code/tree/master/code/unrealscript/AutoTeamBalance)
-  - Note that NexgenATB partly uses code from ATB
+   - Note that NexgenATB partly uses code from ATB
    
 ---
 
