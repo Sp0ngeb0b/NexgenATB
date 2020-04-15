@@ -76,15 +76,28 @@ const newLineToken = "\\n";                    // Token used to detect new lines
  **************************************************************************************************/
 function bool initialize() {
 
-  if(TeamGamePlus(Level.Game) == none || TeamGamePlus(Level.Game).MaxTeams != 2) return false;
-
-  // Disable for the current game?
-  if(!control.sConf.enableNexgenStartControl || control.sConf.matchModeActivated) {
-    TeamGamePlus(Level.Game).bBalanceTeams = true;
+  // Check if supported gametype
+  if(TeamGamePlus(Level.Game) == none || TeamGamePlus(Level.Game).MaxTeams != 2) {
+    control.nscLog("[NATB] Not a team game or more than 2 teams, not initialising ...");
     return false;
-  } else {
-    TeamGamePlus(Level.Game).bBalanceTeams = false;
   }
+  
+  // Turned off?
+  if(!control.sConf.enableNexgenStartControl) {
+    TeamGamePlus(Level.Game).bPlayersBalanceTeams = true;
+    control.nscLog("[NATB] enableNexgenStartControl is disabled, not initialising ...");
+    return false;
+  }
+  
+  // Disable for the current game?
+  if(!control.sConf.enableNexgenStartControl || control.sConf.matchModeActivated || control.gInf.bTournamentMode) {
+    TeamGamePlus(Level.Game).bPlayersBalanceTeams = true;
+    control.nscLog("[NATB] Match mode or tournament active; deactivating for the current game ...");
+    return false;
+  }
+  
+  // We explicitly allow uneven team sizes
+  TeamGamePlus(Level.Game).bPlayersBalanceTeams = false;
 
   // Load settings.
   if (control.bUseExternalConfig) {
@@ -254,7 +267,7 @@ function playerRespawned(NexgenClient client) {
   
   ATBClient = getATBClient(client);
   
-  if(control.gInf != none && control.gInf.gameState == control.gInf.GS_Playing && ATBClient != none && ATBClient.bMidGameJoin && !ATBClient.bTeamAssigned) {  
+  if(control.gInf.gameState == control.gInf.GS_Playing && ATBClient != none && ATBClient.bMidGameJoin && !ATBClient.bTeamAssigned) {  
     Level.Game.DiscardInventory(client.player); 
     client.player.PlayerRestartState = 'PlayerWaiting';
     client.player.GotoState(client.player.PlayerRestartState);
@@ -303,7 +316,7 @@ function tick(float deltaTime) {
   local NexgenATBClient ATBClient;
   
   // Waiting state: Handle gamestart and trigger initial sorting
-  if(control.gInf != none && control.gInf.gameState == control.gInf.GS_Waiting) {
+  if(control.gInf.gameState == control.gInf.GS_Waiting) {
   
     // Supress manual game start messages
     if(control.gInf.countDown == 1)  {
@@ -386,7 +399,7 @@ function tick(float deltaTime) {
   } 
   
   // Starting state: clear progress messages for sorted players and handle latecomers
-  if(control.gInf != none && control.gInf.gameState == control.gInf.GS_Starting) { 
+  if(control.gInf.gameState == control.gInf.GS_Starting) { 
     for(client = control.clientList; client != none; client = client.nextClient) {
       ATBClient = getATBClient(client);
       if(ATBClient != none) {
@@ -418,7 +431,7 @@ function tick(float deltaTime) {
   }
   
   // Playing state: mid-game joined players
-  if(control.gInf != none && control.gInf.gameState == control.gInf.GS_Playing) { 
+  if(control.gInf.gameState == control.gInf.GS_Playing) { 
     for(client = control.clientList; client != none; client = client.nextClient) {
       ATBClient = getATBClient(client);
       if(ATBClient != none) {
@@ -468,7 +481,7 @@ function tick(float deltaTime) {
   }
   
   // Game-ended state: Trigger strengths update.
-  if(control.gInf != none && control.gInf.gameState == control.gInf.GS_Ended) {
+  if(control.gInf.gameState == control.gInf.GS_Ended) {
     if(!bStrengthsUpdated && (control.timeSeconds - control.gameEndTime) > endUpdateDelay) {
       updateStrengths();
       bStrengthsUpdated = true;
@@ -489,8 +502,6 @@ function virtualTimer() {
   local int midGameJoinToSort;
   local int teamSizes[2];
   
-  if(control.gInf == none) return;
-
   // Mid-game-joins
   if(control.gInf.gameState != control.gInf.GS_Ended && midGameJoinTeamSortingTime == 0.0 && longestMidGameJoinWaitTime != 0.0 && (control.timeSeconds - longestMidGameJoinWaitTime) > minMidGameJoinWaitTime) {
     // Check for other waiting clients
@@ -830,7 +841,7 @@ function midGameRebalanceTeamSize() {
   }
   
   // Announce strengths
-  control.broadcastMsg("<C04>Nexgen Auto Team Balancer moved "$getPlayerString(movedPlayerAmount)$" due to unbalanced team sizes!");
+  control.broadcastMsg("<C04>Nexgen Auto Team Balancer moved "$movedPlayerAmount$" "$getPlayerString(movedPlayerAmount)$" due to unbalanced team sizes!");
   control.broadcastMsg("<C04>Red team strength is "$  Left(getTeamStrength(0), InStr(getTeamStrength(0), ".")+3)$
                        ", Blue team strength is "$  Left(getTeamStrength(1), InStr(getTeamStrength(1), ".")+3)$".");
   
@@ -967,7 +978,6 @@ function removeATBDisconnectedClient(NexgenATBClient ATBClient) {
  *
  **************************************************************************************************/
 function ATBClientInit(NexgenATBClient ATBClient) {
-  if(control.gInf == none) return;
 
   if( (control.gInf.gameState == control.gInf.GS_Waiting && initialTeamSortTime != 0.0) ||
        control.gInf.gameState == control.gInf.GS_Starting ||
@@ -994,7 +1004,7 @@ function flashNewTeamAssignments(NexgenClient clients[8]) {
   local int i;
   
   // Skip initial sorting assignments.
-  if(control.gInf != none && control.gInf.gameState == control.gInf.GS_Waiting) return;
+  if(control.gInf.gameState == control.gInf.GS_Waiting) return;
   
   // Construct strings
   for(i=0; i<arrayCount(newProgressMsgs) && clients[i] != none; i++) {
