@@ -60,6 +60,9 @@ const minPlayerAmount          = 2;            // Min amount of participating pl
 const normalisedStrength       = 50;           // Average strength we are aiming for when normalising.
 const relNormalisationProp     = 0.5;          // Percentage to weight the total average strength of participating players when normalising [0,1].
 const hoursBeforeRecyStrength  = 4.0;          // Amount of hours played to consider when weighting strength of current game against saved strength.
+                
+const teamAssignMsgsDuration   = 3.0;               
+const specProgressMsgDuration  = 7.0;          //                               
                                         
 const newLineToken = "\\n";                    // Token used to detect new lines in texts
 
@@ -116,6 +119,7 @@ function bool initialize() {
  **************************************************************************************************/
 function playerJoined(NexgenClient client) {
   local NexgenATBClient ATBClient;
+  local NexgenClient clients[8];
   
   if(client.bSpectator) return;
   
@@ -132,8 +136,15 @@ function playerJoined(NexgenClient client) {
       ATBClient.beginPlayTime = control.timeSeconds;
       assignTeam(ATBClient, ATBClient.team);
       lastStrengthChangeTime = control.timeSeconds;
+      
+      if(control.timeSeconds - ATBClient.disconnectedTime > maxReconnectWaitTime) {
+        // Announce again
+        clients[0] = client;
+        flashNewTeamAssignments(clients);
+      }
     } else {
       ATBClient.bTeamAssigned = false;
+      ATBClient.bMidGameJoin = true;
       ATBClient.initialized(); // Clients on the disconnected list are ensured to be initialized
     }
     
@@ -197,7 +208,7 @@ function playerLeft(NexgenClient client) {
           ATBClient.playTime += control.timeSeconds-ATBClient.beginPlayTime;
           ATBClient.score     = client.player.playerReplicationInfo.score;
         }
-        ATBClient.disconnectedTime = level.timeSeconds;
+        ATBClient.disconnectedTime = control.timeSeconds;
         ATBClient.beginPlayTime = 0.0;
         
         // Update global vars
@@ -260,6 +271,7 @@ function playerRespawned(NexgenClient client) {
  **************************************************************************************************/
 function playerTeamChanged(NexgenClient client) {
   local NexgenATBClient ATBClient;
+  local NexgenClient clients[8];
   
   ATBClient = getATBClient(client);
   
@@ -271,6 +283,9 @@ function playerTeamChanged(NexgenClient client) {
       teamStrength[client.team]             += ATBClient.strength;
       teamStrength[int(!bool(client.team))] -= ATBClient.strength;
       lastStrengthChangeTime = control.timeSeconds;
+      
+      clients[0] = client;
+      flashNewTeamAssignments(clients);
     }
   }
 }
@@ -281,7 +296,6 @@ function playerTeamChanged(NexgenClient client) {
  *
  **************************************************************************************************/
 function tick(float deltaTime) {
-  local int i;
   local int numPlayersInitialized;
   local bool bStillIniting;
   local float playerJoinTime;
@@ -302,10 +316,10 @@ function tick(float deltaTime) {
       // Override team message
       for(client = control.clientList; client != none; client = client.nextClient) {
         if(!client.bSpectator) {
-          FlashMessageToPlayer(client, "Teams not yet assigned.", colorOrange);
+          flashMessageToPlayer(client, "Teams not yet assigned.", colorOrange);
         }
-        if(client.bInitialized) FlashMessageToPlayer(client, "Say !o to open the Nexgen control panel.", colorWhite, 1);
-        else                    FlashMessageToPlayer(client, "", colorWhite, 1);        
+        if(client.bInitialized) flashMessageToPlayer(client, "Say !o to open the Nexgen control panel.", colorWhite, 1);
+        else                    flashMessageToPlayer(client, "", colorWhite, 1);        
       }
       
       // Single player?
@@ -346,24 +360,22 @@ function tick(float deltaTime) {
     } else {
       // Teams sorted. Flash progress messages.
       for(client = control.clientList; client != none; client = client.nextClient) {
-        if(!client.bSpectator) {
-          ATBClient = getATBClient(client);
-          if(ATBClient != none) {
-            if(!ATBClient.bMidGameJoin) {
-              FlashMessageToPlayer(client ,"You are on "$TeamGamePlus(Level.Game).Teams[client.player.playerReplicationInfo.team].TeamName$".", teamColor[client.player.playerReplicationInfo.team]);
-              if(client.bInitialized) FlashMessageToPlayer(client, "Say !o to open the Nexgen control panel.", colorWhite, 1);     
-              else                    FlashMessageToPlayer(client, "", colorWhite, 1); 
-            } else {
-              // Latecomer. Only show correct messages; mid-game-join sorting not in this state.
-              FlashMessageToPlayer(client, "You are not yet assigned to a team.", colorOrange);
-              if(!ATBClient.bInitialized) FlashMessageToPlayer(ATBClient.client, "Waiting for client initialization ...", colorWhite, 1);
-              else                        FlashMessageToPlayer(ATBClient.client, "Waiting for team assignment ...", colorWhite, 1);
-            }
+        ATBClient = getATBClient(client);
+        if(ATBClient != none) {
+          if(!ATBClient.bMidGameJoin) {
+            flashMessageToPlayer(client ,"You are on "$TeamGamePlus(Level.Game).Teams[client.player.playerReplicationInfo.team].TeamName$".", teamColor[client.player.playerReplicationInfo.team]);
+            if(client.bInitialized) flashMessageToPlayer(client, "Say !o to open the Nexgen control panel.", colorWhite, 1);     
+            else                    flashMessageToPlayer(client, "", colorWhite, 1); 
+          } else {
+            // Latecomer. Only show correct messages; mid-game-join sorting not in this state.
+            flashMessageToPlayer(client, "You are not yet assigned to a team.", colorOrange);
+            if(!ATBClient.bInitialized) flashMessageToPlayer(ATBClient.client, "Waiting for client initialization ...", colorWhite, 1);
+            else                        flashMessageToPlayer(ATBClient.client, "Waiting for team assignment ...", colorWhite, 1);
           }
         } else {
           // Spectators
-          if(client.bInitialized) FlashMessageToPlayer(client, "Say !o to open the Nexgen control panel.", colorWhite, 1);     
-          else                    FlashMessageToPlayer(client, "", colorWhite, 1); 
+          if(client.bInitialized) flashMessageToPlayer(client, "Say !o to open the Nexgen control panel.", colorWhite, 1);     
+          else                    flashMessageToPlayer(client, "", colorWhite, 1); 
         }        
       }
       if( (control.timeSeconds - initialTeamSortTime) >= gameStartDelay) {
@@ -375,27 +387,29 @@ function tick(float deltaTime) {
   
   // Starting state: clear progress messages for sorted players and handle latecomers
   if(control.gInf != none && control.gInf.gameState == control.gInf.GS_Starting) { 
-    for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
-      if(!ATBClient.client.bSpectator) {
+    for(client = control.clientList; client != none; client = client.nextClient) {
+      ATBClient = getATBClient(client);
+      if(ATBClient != none) {
         if(!ATBClient.bMidGameJoin) {
-          // Clear progress messages
-          for(i=0; i<7; i++) ATBClient.client.player.SetProgressMessage("", i);
+          client.player.ClearProgressMessages();
         } else {
           // Latecomer
           if(!ATBClient.bTeamAssigned) {
-            FlashMessageToPlayer(ATBClient.client, "You are not yet assigned to a team.", colorOrange);
-            if(!ATBClient.bInitialized) FlashMessageToPlayer(ATBClient.client, "Waiting for client initialization ...", colorWhite, 1);
-            else                        FlashMessageToPlayer(ATBClient.client, "Waiting for team assignment ...", colorWhite, 1);
+            flashMessageToPlayer(client, "You are not yet assigned to a team.", colorOrange);
+            if(!ATBClient.bInitialized) flashMessageToPlayer(client, "Waiting for client initialization ...", colorWhite, 1);
+            else                        flashMessageToPlayer(client, "Waiting for team assignment ...", colorWhite, 1);
           } else {
             if(midGameJoinTeamSortingTime != 0.0 && (control.timeSeconds - midGameJoinTeamSortingTime) > gameStartDelay) {
-              // Clear progress message
-              for(i=0; i<7; i++) ATBClient.client.player.SetProgressMessage("", i);
+              client.player.ClearProgressMessages();
             } else {
-              FlashMessageToPlayer(ATBClient.client, "You are on "$TeamGamePlus(Level.Game).Teams[ATBClient.client.player.playerReplicationInfo.team].TeamName$".", teamColor[ATBClient.client.player.playerReplicationInfo.team]);
-              FlashMessageToPlayer(ATBClient.client, "Say !o to open the Nexgen control panel.", colorWhite, 1);     
+              flashMessageToPlayer(client, "You are on "$TeamGamePlus(Level.Game).Teams[client.player.playerReplicationInfo.team].TeamName$".", teamColor[client.player.playerReplicationInfo.team]);
+              flashMessageToPlayer(client, "Say !o to open the Nexgen control panel.", colorWhite, 1);     
             }
           }
         }
+      } else {
+        // Spectators
+        if(client.timeSeconds > specProgressMsgDuration) client.player.ClearProgressMessages();
       }
     }
     if(midGameJoinTeamSortingTime != 0.0 && (control.timeSeconds - midGameJoinTeamSortingTime) > gameStartDelay) {
@@ -405,29 +419,37 @@ function tick(float deltaTime) {
   
   // Playing state: mid-game joined players
   if(control.gInf != none && control.gInf.gameState == control.gInf.GS_Playing) { 
-    for(ATBClient=ATBClientList; ATBClient != none; ATBClient=ATBClient.nextATBClient) {
-      if(!ATBClient.client.bSpectator && ATBClient.client.player.PlayerRestartState == 'PlayerWaiting') {
-        if(!ATBClient.bTeamAssigned) {
-          FlashMessageToPlayer(ATBClient.client, "You are not yet assigned to a team.", colorOrange);
-          if(!ATBClient.bInitialized) FlashMessageToPlayer(ATBClient.client, "Waiting for client initialization ...", colorWhite, 1);
-          else                        FlashMessageToPlayer(ATBClient.client, "Waiting for team assignment ...", colorWhite, 1);
-        } else {
-          if(midGameJoinTeamSortingTime != 0.0 && (control.timeSeconds - midGameJoinTeamSortingTime) > gameStartDelay) {
-            // Clear progress message
-            for(i=0; i<7; i++) ATBClient.client.player.SetProgressMessage("", i);
-            
-            // Play announcer
-            if(playSound != none) ATBClient.client.player.clientPlaySound(playSound, , true);
-            
-            // Restart player
-            ATBClient.client.player.PlayerRestartState = ATBClient.client.player.Default.PlayerRestartState;
-            ATBClient.client.player.GotoState(ATBClient.client.player.PlayerRestartState);
-            if(!Level.Game.RestartPlayer(ATBClient.client.player)) {
-              ATBClient.client.player.GotoState('Dying'); //failed to restart player, so let him try to respawn again
+    for(client = control.clientList; client != none; client = client.nextClient) {
+      ATBClient = getATBClient(client);
+      if(ATBClient != none) {
+        if(client.player.PlayerRestartState == 'PlayerWaiting') {
+          if(!ATBClient.bTeamAssigned) {
+            flashMessageToPlayer(client, "You are not yet assigned to a team.", colorOrange);
+            if(!ATBClient.bInitialized) flashMessageToPlayer(client, "Waiting for client initialization ...", colorWhite, 1);
+            else                        flashMessageToPlayer(client, "Waiting for team assignment ...", colorWhite, 1);
+          } else {
+            if(midGameJoinTeamSortingTime != 0.0 && (control.timeSeconds - midGameJoinTeamSortingTime) > gameStartDelay) {
+              client.player.ClearProgressMessages();
+              
+              // Play announcer
+              if(playSound != none) client.player.clientPlaySound(playSound, , true);
+              
+              // Restart player
+              client.player.PlayerRestartState = client.player.Default.PlayerRestartState;
+              client.player.GotoState(client.player.PlayerRestartState);
+              if(!Level.Game.RestartPlayer(client.player)) {
+                client.player.GotoState('Dying'); //failed to restart player, so let him try to respawn again
+              }
+              ATBClient.beginPlayTime = control.timeSeconds;
             }
-            ATBClient.beginPlayTime = control.timeSeconds;
           }
         }
+      } else {
+        // Spectators
+        if(client.timeSeconds < specProgressMsgDuration) { 
+          if(client.bInitialized) flashMessageToPlayer(client, "Say !o to open the Nexgen control panel.", colorWhite, 1, 1.0);     
+          else                    flashMessageToPlayer(client, "", colorWhite, 1.0); 
+        } else if(client.timeSeconds < specProgressMsgDuration+0.1) client.player.ClearProgressMessages();
       }
     }
     if(midGameJoinTeamSortingTime != 0.0 && (control.timeSeconds - midGameJoinTeamSortingTime) > gameStartDelay) {
@@ -673,9 +695,11 @@ function initialTeamSorting(int numPlayersInitialized) {
  **************************************************************************************************/
 function midGameJoinTeamSorting(int midGameJoinToSort) {
   local NexgenATBClient sortedATBClients[32];
+  local NexgenClient    clients[8];
   local int i, weakerTeam, strongerTeam;
   local int start, end;
   local int teamSizes[2];
+  local string playerPluralString;
   
   // Sort waiting clients by strength
   sortNewClientsByStrength(midGameJoinToSort, sortedATBClients);
@@ -692,7 +716,7 @@ function midGameJoinTeamSorting(int midGameJoinToSort) {
   start = 0;
   end = midGameJoinToSort;
   if(teamSizes[weakerTeam] > teamSizes[strongerTeam]) {
-    // The weakest team already has the number advantage
+    // The weakest team already has the number advantage    
     // Put the weakest player into the stronger team
     assignTeam(sortedATBClients[midGameJoinToSort-1], strongerTeam);
     end = midGameJoinToSort-1;
@@ -715,15 +739,19 @@ function midGameJoinTeamSorting(int midGameJoinToSort) {
   for(i=start; i<end; i++) {
     // Move player and update team strength
     assignTeam(sortedATBClients[i], weakerTeam);
-
     weakerTeam = strongerTeam;
   }  
-  // Announce
+  
+  // Announce for new players 
   for(i=0; i<midGameJoinToSort; i++) {
-    FlashMessageToPlayer(sortedATBClients[i].client, "You are on "$TeamGamePlus(Level.Game).Teams[sortedATBClients[i].client.player.playerReplicationInfo.team].TeamName$".", teamColor[sortedATBClients[i].client.player.playerReplicationInfo.team]);
-    FlashMessageToPlayer(sortedATBClients[i].client, "Say !o to open the Nexgen control panel.", colorWhite, 1);     
+    flashMessageToPlayer(sortedATBClients[i].client, "You are on "$TeamGamePlus(Level.Game).Teams[sortedATBClients[i].client.player.playerReplicationInfo.team].TeamName$".", teamColor[sortedATBClients[i].client.player.playerReplicationInfo.team]);
+    flashMessageToPlayer(sortedATBClients[i].client, "Say !o to open the Nexgen control panel.", colorWhite, 1);     
     if(teamSound[sortedATBClients[i].client.player.playerReplicationInfo.team] != none) sortedATBClients[i].client.player.clientPlaySound(teamSound[sortedATBClients[i].client.player.playerReplicationInfo.team], , true);
   }
+  
+  // Announce for others
+  for(i=0; i<midGameJoinToSort && i<ArrayCount(clients); i++) clients[i] = sortedATBClients[i].client;
+  flashNewTeamAssignments(clients); 
   
   // Reset
   longestMidGameJoinWaitTime = 0;
@@ -732,6 +760,7 @@ function midGameJoinTeamSorting(int midGameJoinToSort) {
   // Save time
   midGameJoinTeamSortingTime = control.timeSeconds;
 }
+
 
 /***************************************************************************************************
  *
@@ -748,6 +777,8 @@ function midGameRebalanceTeamSize() {
   local int nextPlayerToMove;
   local int movedPlayerAmount;
   local int i;
+  local int movedClients;
+  local NexgenClient clients[8];
   
   // Figure out what to do
   getTeamSizes(teamSizes);
@@ -766,11 +797,8 @@ function midGameRebalanceTeamSize() {
       if(sortedATBClientsLargerTeam[nextPlayerToMove].client.player.playerReplicationInfo.hasFlag != none) nextPlayerToMove--;
       
       assignTeam(sortedATBClientsLargerTeam[nextPlayerToMove], smallerTeam);
+      if(movedClients < arrayCount(clients)) clients[movedClients++] = sortedATBClientsLargerTeam[nextPlayerToMove].client;
       teamStrength[largerTeam]  -= sortedATBClientsLargerTeam[nextPlayerToMove].strength;
-      
-      // Inform player
-      for(i=0; i<7; i++)   sortedATBClientsLargerTeam[nextPlayerToMove].client.player.SetProgressMessage("", i);
-      FlashMessageToPlayer(sortedATBClientsLargerTeam[nextPlayerToMove].client, "Assigned to "$TeamGamePlus(Level.Game).Teams[smallerTeam].TeamName$" due to unbalanced team sizes!", teamColor[smallerTeam]);
       
       movedPlayerAmount++;
       nextPlayerToMove--;
@@ -780,7 +808,7 @@ function midGameRebalanceTeamSize() {
   } else {    
     do {
       strengthDifference = getTeamStrength(largerTeam) - getTeamStrength(smallerTeam);
-      preferedATBClient = getBestSwitch(largerTeam, strengthDifference);
+      preferedATBClient  = getBestSwitch(largerTeam, strengthDifference);
       
       // Manual check when player amount is odd
       if(sizeDifference == 1 && strengthDifference < abs(strengthDifference-preferedATBClient.strength*2)+oddPlayerChangeThreshold) {
@@ -788,11 +816,12 @@ function midGameRebalanceTeamSize() {
       }
      
       assignTeam(preferedATBClient, smallerTeam);
+      if(movedClients < arrayCount(clients)) clients[movedClients++] = preferedATBClient.client;
       teamStrength[largerTeam]  -= preferedATBClient.strength;
       
       // Inform player 
       for(i=0; i<7; i++)   preferedATBClient.client.player.SetProgressMessage("", i);
-      FlashMessageToPlayer(preferedATBClient.client, "Assigned to "$TeamGamePlus(Level.Game).Teams[smallerTeam].TeamName$" due to unbalanced team sizes!", teamColor[smallerTeam]);
+      flashMessageToPlayer(preferedATBClient.client, "Assigned to "$TeamGamePlus(Level.Game).Teams[smallerTeam].TeamName$" due to unbalanced team sizes!", teamColor[smallerTeam]);
 
       movedPlayerAmount++;
       sizeDifference -= 2;
@@ -801,9 +830,13 @@ function midGameRebalanceTeamSize() {
   }
   
   // Announce strengths
-  control.broadcastMsg("<C04>Nexgen Auto Team Balancer moved "$movedPlayerAmount$" player(s) due to unbalanced team sizes!");
+  control.broadcastMsg("<C04>Nexgen Auto Team Balancer moved "$getPlayerString(movedPlayerAmount)$" due to unbalanced team sizes!");
   control.broadcastMsg("<C04>Red team strength is "$  Left(getTeamStrength(0), InStr(getTeamStrength(0), ".")+3)$
                        ", Blue team strength is "$  Left(getTeamStrength(1), InStr(getTeamStrength(1), ".")+3)$".");
+  
+  // Announce to others
+  flashNewTeamAssignments(clients);
+  
   // Reset
   lastStrengthChangeTime = control.timeSeconds;
 }
@@ -949,10 +982,55 @@ function ATBClientInit(NexgenATBClient ATBClient) {
 
 /***************************************************************************************************
  *
+ *  $DESCRIPTION  Flashes messages to all players (as long as their initial messages are cleared).
+ *                Used for showing colored team assignment messages.
+ *
+ **************************************************************************************************/
+function flashNewTeamAssignments(NexgenClient clients[8]) {
+  local NexgenClient client;
+  local NexgenATBClient ATBClient;
+  local string newProgressMsgs[8];
+  local color  newProgressMsgsColors[8];
+  local int i;
+  
+  // Skip initial sorting assignments.
+  if(control.gInf != none && control.gInf.gameState == control.gInf.GS_Waiting) return;
+  
+  // Construct strings
+  for(i=0; i<arrayCount(newProgressMsgs) && clients[i] != none; i++) {
+    newProgressMsgs[i]       = clients[i].playerName$" is now on "$TeamGamePlus(Level.Game).Teams[clients[i].player.playerReplicationInfo.team].TeamName$".";
+    newProgressMsgsColors[i] = teamColor[clients[i].player.playerReplicationInfo.team];
+  }
+
+  for(client = control.clientList; client != none; client = client.nextClient) {
+    ATBClient = getATBClient(client);
+    if(ATBClient != none) {
+      if(!ATBClient.bMidGameJoin || ATBClient.beginPlayTime > 0.0) {
+        for(i=0; i<ArrayCount(newProgressMsgs); i++) {
+          client.player.SetProgressTime(teamAssignMsgsDuration);
+          client.player.SetProgressColor(newProgressMsgsColors[i], i);
+          client.player.SetProgressMessage(newProgressMsgs[i], i);
+        }
+      }
+    } else {
+      // Spectators.
+      if(client.timeSeconds >= specProgressMsgDuration+0.1) {
+        for(i=0; i<ArrayCount(newProgressMsgs); i++) {
+          client.player.SetProgressTime(teamAssignMsgsDuration);
+          client.player.SetProgressColor(newProgressMsgsColors[i], i);
+          client.player.SetProgressMessage(newProgressMsgs[i], i);
+        } 
+      }
+    }
+  }
+}
+
+/***************************************************************************************************
+ *
  *  $DESCRIPTION  Overrides the progress messages. Taken from ATB 1.5.
  *
  **************************************************************************************************/
-function FlashMessageToPlayer(NexgenClient client, string Msg, Color msgColor, optional int offset) {
+function flashMessageToPlayer(NexgenClient client, string msg, Color msgColor, optional int offset, optional float duration) {
   local int targetLine;
   
   if(client == none) return;
@@ -967,10 +1045,12 @@ function FlashMessageToPlayer(NexgenClient client, string Msg, Color msgColor, o
    targetLine = 2;
   if (Level.NetMode==NM_Standalone)
    targetLine = 2; // At least true for CTF
+   
+  if(duration == 0.0) duration = 5.0;
 
   client.player.SetProgressTime(5);
   client.player.SetProgressColor(msgColor,targetLine+offset);
-  client.player.SetProgressMessage(Msg,targetLine+offset);  
+  client.player.SetProgressMessage(msg,targetLine+offset);  
 }
 
 /***************************************************************************************************
@@ -985,6 +1065,8 @@ function assignTeam(NexgenATBClient ATBClient, byte newTeam) {
     ATBClient.client.setTeam(newTeam);
     ATBClient.bTeamSwitched = true;
   }
+  
+  // Announce
 }
 
 /***************************************************************************************************
@@ -1213,6 +1295,37 @@ function updatePlayerStrength(NexgenATBClient ATBClient, float avgScore, float a
 
 /***************************************************************************************************
  *
+ *  $DESCRIPTION  Called to check if the given localized message should be send to the specified
+ *                receiver.
+ *  $PARAM        sender          The actor that has send the message.
+ *  $PARAM        receiver        Pawn receiving the message.
+ *  $PARAM        message         The class of the localized message that is to be send.
+ *  $PARAM        switch          Optional message switch argument.
+ *  $PARAM        relatedPRI_1    PlayerReplicationInfo of a player that is related to the message.
+ *  $PARAM        relatedPRI_2    PlayerReplicationInfo of a player that is related to the message.
+ *  $PARAM        optionalObject  Optional object used to construct the message string.
+ *  $REQUIRE      message != none
+ *  $RETURN       True if the message should be send, false if it should be suppressed.
+ *
+ **************************************************************************************************/
+function bool mutatorBroadcastLocalizedMessage(Actor sender, Pawn receiver,
+                                               out class<LocalMessage> message,
+                                               out optional int switch,
+                                               out optional PlayerReplicationInfo relatedPRI_1,
+                                               out optional PlayerReplicationInfo relatedPRI_2,
+                                               out optional Object optionalObject) {
+                                               
+  // Hide default team assignment messages                                             
+	if(message == DeathMatchPlus(Level.Game).DMMessageClass && switch == 3) return false;
+  
+  return true;
+}
+
+
+function string getPlayerString(int amount) { if(amount > 1) return "players"; else return "player";}
+
+/***************************************************************************************************
+ *
  *  $DESCRIPTION  Default properties block.
  *
  **************************************************************************************************/
@@ -1226,6 +1339,6 @@ defaultproperties
      TeamColor(3)=(R=255,G=255,B=0,A=32)
      pluginName="Nexgen Auto Team Balancer"
      pluginAuthor="Sp0ngeb0b"
-     pluginVersion="0.30"
-     versionNum=030
+     pluginVersion="0.31"
+     versionNum=031
 }
