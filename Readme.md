@@ -1,4 +1,4 @@
-**NexgenATB version 0.30 (Beta)**
+**NexgenATB version 0.31 (Beta)**
 -
 
 ![file](https://user-images.githubusercontent.com/12958319/79121922-bc8ac980-7d96-11ea-86d2-5fbe36adf820.jpg)
