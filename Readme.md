@@ -15,7 +15,7 @@ The mod is is still in beta testing; you can access the latest version from [her
 **Known limitations:**
 
  - NexgenATB only supports teamgames with 2 teams
- - NexgenATB will not move players automatically when the team size is not uneven (3 vs 2 for example); in this case, players are encouraged to manually switch the teams (to either make it 2 vs 3 and balanced _or_ 4 vs 1 in order to trigger NexgenATB automatic rebalancing). This feature is open for discussion and some kind of player voting to rebalance even in case of even team sizes might be implemented. 
+ - NexgenATB will not move players automatically when the team size is not uneven (3 vs 2 for example); in this case, players are encouraged to manually switch the teams (to either make it 2 vs 3 and balanced _or_ 4 vs 1 in order to trigger NexgenATB automatic rebalancing). Note that this won't work if team switching is disabled on the server. An improvement is open for discussion and some kind of player voting to rebalance also in case of even team sizes might be implemented. 
 
 ---
 **Description**
