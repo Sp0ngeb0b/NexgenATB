@@ -4,7 +4,7 @@
 ![file](https://user-images.githubusercontent.com/12958319/79121922-bc8ac980-7d96-11ea-86d2-5fbe36adf820.jpg)
 
 
-**Nexgen Auto Team Balancer** (*NexgenATB*) is a completely rewritten version of nogginBasher's [AutoTeamBalance](https://unrealadmin.org/forums/showthread.php?t=23777) for the Nexgen Server Controller.
+**Nexgen Auto Team Balancer** (*NexgenATB*) is a completely rewritten version of nogginBasher's [AutoTeamBalance](https://unrealadmin.org/forums/showthread.php?t=23777) for the [Nexgen Server Controller](https://ut99.org/viewtopic.php?f=3&t=13841).
 
 ---
 **Beta Testing**
